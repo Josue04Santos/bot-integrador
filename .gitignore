@@ -94,3 +94,4 @@ temp/
 src.backup_*/
 *.backup_*/
 backup_*/
+*.pyc
