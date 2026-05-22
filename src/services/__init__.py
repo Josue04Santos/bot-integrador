@@ -1,5 +1,10 @@
-from .parser import ResponseParser
-from .kml_generator import KMLGenerator
-from .query_processor import QueryProcessor
+"""
+Serviços de domínio.
 
-__all__ = ["ResponseParser", "KMLGenerator", "QueryProcessor"]
+⚠️ Conteúdo legado removido em refatoração:
+   - kml_generator.py → migrado para src/exporters/
+   - query_processor.py → não utilizado
+"""
+from .parser import ResponseParser
+
+__all__ = ["ResponseParser"]
