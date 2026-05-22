@@ -1,22 +1,21 @@
-"""
-Handlers do bot Telegram.
-"""
+"""Registra todos os routers de handlers no Router principal."""
 
 from aiogram import Router
 
-from .start import router as start_router
+from .export import router as export_router
 from .help import router as help_router
+from .query import router as query_router
+from .start import router as start_router
+from .whoami import router as whoami_router
 
 
 def register_handlers(router: Router) -> None:
     """
-    Registra todos os handlers no router principal.
-    
-    Args:
-        router: Router principal do dispatcher.
+    Ordem importa: handlers mais específicos primeiro,
+    catch-all (help) por último.
     """
-    router.include_router(start_router)
-    router.include_router(help_router)
-
-
-__all__ = ["register_handlers"]
+    router.include_router(start_router)     # /start, /status
+    router.include_router(whoami_router)    # /whoami
+    router.include_router(query_router)     # callbacks + FSM
+    router.include_router(export_router)    # /kml + callback kml:*
+    router.include_router(help_router)      # último: fallback

@@ -1,0 +1,246 @@
+"""
+Handler do fluxo de consulta:
+1. Usuário clica [POSTE] ou [EQUIPAMENTO]
+2. Bot pede o(s) código(s)
+3. Usuário envia texto ou .txt
+4. Bot parseia, cria batch + queries no DB, enfileira
+"""
+
+import re
+from io import BytesIO
+
+from aiogram import Bot, F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+
+from src.bot.keyboards.main_menu import (
+    CB_CANCEL,
+    CB_QUERY_EQUIPAMENTO,
+    CB_QUERY_POSTE,
+    cancel_kb,
+)
+from src.bot.states.query_states import QueryStates
+from src.database.connection import db
+from src.database.models import NetworkQuery, QueryBatch
+from src.dispatcher import QueueItem, query_queue
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+router = Router(name="query")
+
+# Limites
+MAX_CODES_PER_BATCH = 500
+MAX_TXT_SIZE_BYTES = 256 * 1024  # 256 KB
+
+# Regex: separa por vírgula, ponto-vírgula, espaço, tab, quebra de linha
+_SEP_RE = re.compile(r"[,;\s]+")
+# Código válido: 3 a 20 chars alfanuméricos (ajustar se EQTL tiver formato específico)
+_CODE_RE = re.compile(r"^[A-Za-z0-9\-_]{3,20}$")
+
+
+# ============================================================================
+# 1) Callbacks dos botões POSTE / EQUIPAMENTO
+# ============================================================================
+
+@router.callback_query(F.data == CB_QUERY_POSTE)
+async def on_choose_poste(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(QueryStates.waiting_code)
+    await state.update_data(query_type="poste")
+    await cb.message.answer(
+        "🏗️ <b>Consulta de POSTE</b>\n\n"
+        "Envie o(s) código(s):\n"
+        "• <b>1 código:</b> <code>12345</code>\n"
+        "• <b>Vários:</b> <code>12345, 67890, 11111</code>\n"
+        "• <b>Arquivo:</b> envie um <code>.txt</code> com 1 código por linha\n\n"
+        f"<i>Limite: {MAX_CODES_PER_BATCH} códigos por lote</i>",
+        reply_markup=cancel_kb(),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data == CB_QUERY_EQUIPAMENTO)
+async def on_choose_equipamento(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(QueryStates.waiting_code)
+    await state.update_data(query_type="instalacao")
+    await cb.message.answer(
+        "⚡ <b>Consulta de EQUIPAMENTO/INSTALAÇÃO</b>\n\n"
+        "Envie o(s) código(s):\n"
+        "• <b>1 código:</b> <code>123456789</code>\n"
+        "• <b>Vários:</b> <code>123456, 789012</code>\n"
+        "• <b>Arquivo:</b> envie um <code>.txt</code> com 1 código por linha\n\n"
+        f"<i>Limite: {MAX_CODES_PER_BATCH} códigos por lote</i>",
+        reply_markup=cancel_kb(),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data == CB_CANCEL)
+async def on_cancel(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await cb.message.answer("❌ Operação cancelada. Use /start para começar de novo.")
+    await cb.answer("Cancelado")
+
+
+# ============================================================================
+# 2) Recepção de texto com códigos
+# ============================================================================
+
+@router.message(QueryStates.waiting_code, F.text)
+async def on_codes_text(
+    message: Message,
+    state: FSMContext,
+    auth_user_id: str,
+) -> None:
+    raw = message.text.strip()
+    await _process_codes_input(message, state, auth_user_id, raw, source_label="texto")
+
+
+# ============================================================================
+# 3) Recepção de arquivo .txt
+# ============================================================================
+
+@router.message(QueryStates.waiting_code, F.document)
+async def on_codes_file(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    auth_user_id: str,
+) -> None:
+    doc = message.document
+
+    if not (doc.file_name or "").lower().endswith(".txt"):
+        await message.answer("⚠️ Envie apenas arquivos <b>.txt</b>.")
+        return
+
+    if doc.file_size and doc.file_size > MAX_TXT_SIZE_BYTES:
+        await message.answer(
+            f"⚠️ Arquivo muito grande (>{MAX_TXT_SIZE_BYTES // 1024} KB)."
+        )
+        return
+
+    buf = BytesIO()
+    await bot.download(doc, destination=buf)
+    try:
+        raw = buf.getvalue().decode("utf-8", errors="ignore")
+    except Exception:
+        await message.answer("⚠️ Não consegui ler o arquivo (codificação inválida).")
+        return
+
+    await _process_codes_input(
+        message, state, auth_user_id, raw, source_label=f"arquivo {doc.file_name}"
+    )
+
+
+# ============================================================================
+# 4) Lógica comum: parse → validação → DB → fila
+# ============================================================================
+
+async def _process_codes_input(
+    message: Message,
+    state: FSMContext,
+    auth_user_id: str,
+    raw: str,
+    source_label: str,
+) -> None:
+    data = await state.get_data()
+    query_type: str = data.get("query_type", "poste")
+
+    # Parse e deduplica preservando ordem
+    tokens = [t for t in _SEP_RE.split(raw) if t]
+    seen: set[str] = set()
+    codes: list[str] = []
+    invalid: list[str] = []
+    for t in tokens:
+        if t in seen:
+            continue
+        seen.add(t)
+        if _CODE_RE.match(t):
+            codes.append(t)
+        else:
+            invalid.append(t)
+
+    if not codes:
+        await message.answer(
+            "⚠️ Nenhum código válido encontrado.\n"
+            "Use letras/números (3-20 chars). Tente novamente ou /start pra cancelar."
+        )
+        return
+
+    if len(codes) > MAX_CODES_PER_BATCH:
+        await message.answer(
+            f"⚠️ Você enviou <b>{len(codes)}</b> códigos, mas o limite é "
+            f"<b>{MAX_CODES_PER_BATCH}</b> por lote.\n"
+            f"Divida em lotes menores."
+        )
+        return
+
+    # Cria batch + queries no DB
+    async with db.session() as session:
+        batch = QueryBatch(
+            user_id=auth_user_id,
+            source="bot",
+            raw_input=raw[:5000],  # trunca pra não estourar
+            status="pending",
+            total_codes=len(codes),
+        )
+        session.add(batch)
+        await session.flush()  # gera batch.id
+
+        queries: list[NetworkQuery] = []
+        for code in codes:
+            q = NetworkQuery(
+                batch_id=batch.id,
+                code=code,
+                query_type=query_type,
+                status="pending",
+            )
+            session.add(q)
+            queries.append(q)
+        await session.flush()  # gera ids
+        await session.commit()
+
+        # Captura os IDs antes de sair do session
+        items = [
+            QueueItem(
+                query_id=q.id,
+                batch_id=batch.id,
+                user_tg_id=message.from_user.id,
+                code=q.code,
+                query_type=q.query_type,
+            )
+            for q in queries
+        ]
+
+    # Enfileira
+    for item in items:
+        await query_queue.put(item)
+
+    # Limpa estado
+    await state.clear()
+
+    # Resposta ao usuário
+    invalid_note = ""
+    if invalid:
+        sample = ", ".join(invalid[:5])
+        more = f" (+{len(invalid) - 5})" if len(invalid) > 5 else ""
+        invalid_note = f"\n⚠️ <i>{len(invalid)} código(s) inválido(s) ignorado(s): {sample}{more}</i>"
+
+    tipo_label = "🏗️ POSTE" if query_type == "poste" else "⚡ EQUIPAMENTO"
+    await message.answer(
+        f"⏳ <b>Lote enfileirado!</b>\n\n"
+        f"🆔 Código: <code>#{batch.id[:8]}</code>\n"
+        f"{tipo_label}\n"
+        f"📥 Fonte: {source_label}\n"
+        f"📊 Total: <b>{len(codes)}</b> consulta(s)\n"
+        f"📦 Fila: {query_queue.size()} no total"
+        f"{invalid_note}\n\n"
+        f"<i>Os resultados chegarão aqui conforme forem processados.</i>"
+    )
+
+    logger.info(
+        "Batch criado",
+        batch_id=batch.id[:8],
+        user_id=auth_user_id,
+        total=len(codes),
+        type=query_type,
+    )
