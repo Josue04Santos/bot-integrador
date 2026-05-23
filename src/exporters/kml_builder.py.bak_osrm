@@ -4,7 +4,6 @@ Gera o XML KML a partir de uma lista de PosteData.
 Modos:
 - NATURAL  (ordem=None)     → Folders por alimentador + LineStrings por alimentador
 - OTIMIZADO (ordem=[codes]) → Folder único + LineString seguindo a rota TSP
-                              (com geometria OSRM real se disponível)
 """
 
 from datetime import datetime
@@ -15,8 +14,9 @@ from .parser import PosteData
 from .styles import LINE_COLORS, STYLES, categorize
 
 
-OPTIMIZED_LINE_COLOR = "ffff5500"   # AABBGGRR — laranja vivo
-OPTIMIZED_LINE_WIDTH = "5.0"
+# Cor especial pra rota otimizada (azul vibrante, destaque)
+OPTIMIZED_LINE_COLOR = "ffff5500"  # AABBGGRR — laranja vivo
+OPTIMIZED_LINE_WIDTH = "4.0"
 
 
 def _build_styles_xml() -> str:
@@ -38,6 +38,7 @@ def _build_styles_xml() -> str:
       <LineStyle><color>{color}</color><width>2.5</width></LineStyle>
     </Style>""")
 
+    # Estilo especial da rota otimizada
     parts.append(f"""
     <Style id="line_optimized">
       <LineStyle>
@@ -71,7 +72,8 @@ def _placemark_description(p: PosteData, ordem_num: int | None = None) -> str:
 def _build_placemark(p: PosteData, ordem_num: int | None = None) -> str:
     cat = categorize(p.estruturas_mt, p.estruturas_bt)
     style_id = STYLES[cat][0]
-    name = f"{ordem_num:02d}. {p.code}" if ordem_num is not None else p.code
+    # Nome com numeração se em modo otimizado
+    name = f"{ordem_num}. {p.code}" if ordem_num is not None else p.code
     return f"""
       <Placemark>
         <name>{xml_escape(name)}</name>
@@ -100,29 +102,12 @@ def _build_linestring(alimentador: str, postes: list[PosteData], color_idx: int)
       </Placemark>"""
 
 
-def _build_optimized_linestring(
-    postes_ordenados: list[PosteData],
-    geometry: list[tuple[float, float]] | None = None,
-) -> str:
-    """
-    LineString seguindo a ordem TSP.
-
-    Se 'geometry' for fornecida (lat,lon do OSRM), desenha a rota REAL
-    seguindo as ruas. Senão, faz linha reta entre os postes (fallback).
-    """
-    if geometry and len(geometry) >= 2:
-        coords = " ".join(f"{lon},{lat},0" for lat, lon in geometry)
-        name = "🛣️ Rota Otimizada (rodoviária)"
-    else:
-        coords = " ".join(f"{p.lng},{p.lat},0" for p in postes_ordenados if p.has_coords)
-        name = "🛣️ Rota Otimizada (linha reta)"
-
-    if not coords.strip():
-        return ""
-
+def _build_optimized_linestring(postes_ordenados: list[PosteData]) -> str:
+    """LineString única seguindo a ordem TSP."""
+    coords = " ".join(f"{p.lng},{p.lat},0" for p in postes_ordenados if p.has_coords)
     return f"""
       <Placemark>
-        <name>{name}</name>
+        <name>🛣️ Rota Otimizada</name>
         <styleUrl>#line_optimized</styleUrl>
         <LineString>
           <tessellate>1</tessellate>
@@ -137,8 +122,6 @@ def _stats_html(
     distancia_natural_km: float | None = None,
     distancia_otimizada_km: float | None = None,
     economia_pct: float | None = None,
-    distancia_rodoviaria_km: float | None = None,
-    tempo_estimado_min: float | None = None,
 ) -> str:
     total = len(postes) + len(invalidos)
     com_coords = len(postes)
@@ -158,18 +141,10 @@ Alimentadores: {len(alimentadores)} ({escape(', '.join(alimentadores))})<br/>
     if distancia_otimizada_km is not None:
         body += f"""<br/>
 <b>🛣️ Roteamento Otimizado (TSP)</b><br/>
-Distância natural (reta): {distancia_natural_km:.2f} km<br/>
-Distância otimizada (reta): {distancia_otimizada_km:.2f} km<br/>
+Distância natural: {distancia_natural_km:.2f} km<br/>
+Distância otimizada: {distancia_otimizada_km:.2f} km<br/>
 <b>💰 Economia: {economia_pct:.1f}%</b><br/>
 """
-    if distancia_rodoviaria_km is not None:
-        body += f"""<br/>
-<b>🚗 Rota Rodoviária Real (OSRM)</b><br/>
-Distância por estradas: {distancia_rodoviaria_km:.2f} km<br/>
-"""
-        if tempo_estimado_min is not None:
-            body += f"Tempo estimado: {tempo_estimado_min:.0f} min<br/>"
-
     body += f"<br/>Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
     return f"<![CDATA[{body}]]>"
 
@@ -182,9 +157,6 @@ def build_kml(
     distancia_natural_km: float | None = None,
     distancia_otimizada_km: float | None = None,
     economia_pct: float | None = None,
-    route_geometry: list[tuple[float, float]] | None = None,
-    distancia_rodoviaria_km: float | None = None,
-    tempo_estimado_min: float | None = None,
 ) -> str:
     """
     Gera o XML KML completo.
@@ -192,17 +164,17 @@ def build_kml(
     Args:
         postes: somente os que têm coordenadas válidas.
         batch_id: identificador do lote.
-        invalidos: postes sem coords.
+        invalidos: postes sem coords (vão pro TXT separado).
         ordem: lista de códigos na ordem otimizada (TSP).
-        route_geometry: lista de (lat,lon) traçada pelo OSRM seguindo as ruas.
-                        Se None, desenha linha reta entre postes.
-        distancia_rodoviaria_km: distância real por estradas (OSRM).
-        tempo_estimado_min: tempo estimado de viagem (OSRM).
+               Se None → modo natural (folders por alimentador).
+               Se fornecida → modo otimizado (rota única).
+        distancia_*_km, economia_pct: pra exibir nas stats.
     """
     invalidos = invalidos or []
 
     # ════════ MODO OTIMIZADO ════════
     if ordem is not None:
+        # Indexa por código
         by_code = {p.code: p for p in postes}
         postes_ordenados = [by_code[c] for c in ordem if c in by_code]
 
@@ -210,7 +182,7 @@ def build_kml(
             _build_placemark(p, ordem_num=i + 1)
             for i, p in enumerate(postes_ordenados)
         )
-        linestring = _build_optimized_linestring(postes_ordenados, geometry=route_geometry)
+        linestring = _build_optimized_linestring(postes_ordenados)
 
         folder = f"""
     <Folder>
@@ -222,14 +194,14 @@ def build_kml(
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <name>Lote {xml_escape(batch_id)} — Otimizado</name>
-    <description>{_stats_html(postes, invalidos, distancia_natural_km, distancia_otimizada_km, economia_pct, distancia_rodoviaria_km, tempo_estimado_min)}</description>
+    <description>{_stats_html(postes, invalidos, distancia_natural_km, distancia_otimizada_km, economia_pct)}</description>
 {_build_styles_xml()}
 {folder}
   </Document>
 </kml>
 """
 
-    # ════════ MODO NATURAL ════════
+    # ════════ MODO NATURAL (comportamento original) ════════
     grupos: dict[str, list[PosteData]] = {}
     for p in postes:
         grupos.setdefault(p.alimentador_principal, []).append(p)

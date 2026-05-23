@@ -1,0 +1,151 @@
+"""
+Módulo de exportação: KML otimizado (µ9) + GPX + CSV + TXT.
+
+Uso típico:
+    from src.exporters import generate_bundle
+    bundle = await generate_bundle(batch_id)
+"""
+
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy import select
+
+from src.database.connection import db
+from src.database.models import NetworkQuery, QueryBatch
+from src.services.route_optimizer import RouteOptimizer
+from src.utils.logger import get_logger
+
+from .adapter import postes_to_routepoints
+from .csv_builder import build_csv
+from .gpx_builder import build_gpx
+from .kml_builder import build_invalidos_txt, build_kml
+from .parser import PosteData, parse_poste_response
+
+logger = get_logger(__name__)
+
+
+@dataclass
+class OptimizationStats:
+    """Estatísticas da otimização µ9 (None se não rodou)."""
+    natural_km: float
+    otimizada_km: float
+    economia_pct: float
+    n_paradas: int
+    tempo_ms: float
+
+
+@dataclass
+class ExportBundle:
+    batch_id: str
+    filename_base: str
+    kml_bytes: bytes
+    gpx_bytes: bytes
+    csv_bytes: bytes
+    invalidos_txt: str
+    total: int
+    com_coords: int
+    sem_coords: int
+    optimization: OptimizationStats | None = None
+
+
+async def generate_bundle(batch_id: str) -> ExportBundle | None:
+    """
+    Gera o pacote completo de exportação para um batch.
+    Retorna None se o batch não existir.
+    """
+    async with db.session() as session:
+        batch = await session.get(QueryBatch, batch_id)
+        if not batch:
+            return None
+
+        result = await session.execute(
+            select(NetworkQuery).where(NetworkQuery.batch_id == batch_id)
+        )
+        queries = result.scalars().all()
+
+    # Parse de todas as respostas
+    todos: list[PosteData] = []
+    for q in queries:
+        p = parse_poste_response(q.code, q.raw_response)
+        if q.status != "received" and not p.parse_error:
+            p.parse_error = f"status={q.status}"
+        todos.append(p)
+
+    com_coords = [p for p in todos if p.has_coords]
+    sem_coords = [p for p in todos if not p.has_coords]
+
+    # ════════ µ9 — Otimização de Rota ════════
+    optimization: OptimizationStats | None = None
+    ordem: list[str] | None = None
+
+    if len(com_coords) >= 2:
+        try:
+            route_points = postes_to_routepoints(com_coords)
+            resultado = RouteOptimizer().optimize(route_points)
+
+            ordem = resultado.ordem
+            optimization = OptimizationStats(
+                natural_km=resultado.distancia_natural_km,
+                otimizada_km=resultado.distancia_otimizada_km,
+                economia_pct=resultado.economia_pct,
+                n_paradas=len(ordem),
+                tempo_ms=resultado.tempo_execucao_ms,
+            )
+            logger.info(
+                "µ9 otimizou rota",
+                batch_id=batch_id[:8],
+                economia_pct=round(resultado.economia_pct, 1),
+                paradas=len(ordem),
+                tempo_ms=round(resultado.tempo_execucao_ms, 1),
+            )
+        except Exception as e:
+            logger.warning(
+                "µ9 falhou — usando ordem natural",
+                batch_id=batch_id[:8],
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            ordem = None
+            optimization = None
+
+    # Nome do arquivo
+    data_str = (batch.created_at or datetime.utcnow()).strftime("%Y-%m-%d")
+    short_id = batch_id.replace("-", "")[:8]
+    filename_base = f"postes_{data_str}_{short_id}"
+
+    # KML (modo otimizado se ordem foi gerada)
+    kml_xml = build_kml(
+        com_coords,
+        batch_id,
+        sem_coords,
+        ordem=ordem,
+        distancia_natural_km=optimization.natural_km if optimization else None,
+        distancia_otimizada_km=optimization.otimizada_km if optimization else None,
+        economia_pct=optimization.economia_pct if optimization else None,
+    )
+
+    # GPX (sempre gerado, com ordem se disponível)
+    gpx_xml = build_gpx(com_coords, batch_id, ordem=ordem) if com_coords else ""
+
+    return ExportBundle(
+        batch_id=batch_id,
+        filename_base=filename_base,
+        kml_bytes=kml_xml.encode("utf-8"),
+        gpx_bytes=gpx_xml.encode("utf-8") if gpx_xml else b"",
+        csv_bytes=build_csv(todos),
+        invalidos_txt=build_invalidos_txt(sem_coords),
+        total=len(todos),
+        com_coords=len(com_coords),
+        sem_coords=len(sem_coords),
+        optimization=optimization,
+    )
+
+
+__all__ = [
+    "ExportBundle",
+    "OptimizationStats",
+    "generate_bundle",
+    "parse_poste_response",
+    "PosteData",
+]

@@ -459,7 +459,7 @@ Projeto proprietário — uso interno EQTL Energia. Distribuição, cópia ou us
 👥 Créditos
 Desenvolvimento: Josué Santos
 Assistência arquitetural: ARIA-BUILDER (metodologia µ-tasks)
-Cliente: EQTL Energia — Distribuidora do Maranhão
-⚡ Bot Integrador EQTL · Construído com ❤️ e ☕ em Imperatriz/MA
+Cliente: DPL Construções — Terceirizada
+⚡ Bot Integrador DPL · Construído com ❤️ e ☕ em Imperatriz/MA
 
 🔝 Voltar ao topo

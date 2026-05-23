@@ -57,10 +57,9 @@ async def _resolve_batch_id(raw: str) -> str | None:
 
 async def _send_bundle(message: Message, batch_id: str) -> None:
     """
-    Gera e envia os arquivos KML/CSV do batch.
-    Edita uma mensagem de progresso para feedback fluido.
+    Gera e envia o pacote KML + GPX + CSV otimizados (µ9).
     """
-    progress = await message.answer("⏳ <i>Gerando KML e CSV...</i>")
+    progress = await message.answer("⏳ <i>Otimizando rota (µ9)...</i>")
 
     try:
         bundle = await generate_bundle(batch_id)
@@ -72,33 +71,78 @@ async def _send_bundle(message: Message, batch_id: str) -> None:
         await progress.edit_text(f"❌ Erro ao gerar arquivos: <code>{e}</code>")
         return
 
+    if bundle is None:
+        await progress.edit_text(f"❌ Lote não encontrado: <code>{batch_id[:8]}</code>")
+        return
+
     if bundle.total == 0:
         await progress.edit_text("⚠️ Este lote não tem respostas ainda.")
         return
 
-    # Caption rica
-    caption = (
-        f"📦 <b>Lote</b> <code>#{batch_id[:8]}</code>\n"
-        f"📊 Total: <b>{bundle.total}</b>\n"
-        f"✅ Com coordenadas: <b>{bundle.com_coords}</b>\n"
-        f"⚠️ Sem coordenadas: <b>{bundle.sem_coords}</b>"
-    )
+    # ═══ Caption do KML (com stats da otimização) ═══
+    caption_parts = [
+        f"📦 <b>Lote</b> <code>#{batch_id[:8]}</code>",
+        f"📊 Total: <b>{bundle.total}</b> ({bundle.total_postes} postes, {bundle.total_equipamentos} equipamentos)",
+        f"✅ Com coordenadas: <b>{bundle.com_coords}</b>",
+        f"⚠️ Sem coordenadas: <b>{bundle.sem_coords}</b>",
+    ]
 
-    # Atualiza progresso
+    if bundle.optimization:
+        opt = bundle.optimization
+        caption_parts.append("")
+        caption_parts.append("🛣️ <b>Rota Otimizada (µ9)</b>")
+        caption_parts.append(f"📏 Natural: <code>{opt.natural_km:.2f} km</code>")
+        caption_parts.append(f"⚡ Otimizada: <code>{opt.otimizada_km:.2f} km</code>")
+        caption_parts.append(f"💰 Economia: <b>{opt.economia_pct:.1f}%</b>")
+        caption_parts.append(f"⏱️ Tempo: <code>{opt.tempo_ms:.0f} ms</code>")
+
+    caption = "\n".join(caption_parts)
+
     await progress.edit_text("📤 <i>Enviando arquivos...</i>")
 
-    # KML
+    # 1. KML (com caption rica)
     await message.answer_document(
         BufferedInputFile(bundle.kml_bytes, filename=f"{bundle.filename_base}.kml"),
         caption=caption,
     )
 
-    # CSV (sem caption, anexo do anterior)
-    await message.answer_document(
-        BufferedInputFile(bundle.csv_bytes, filename=f"{bundle.filename_base}.csv"),
-    )
+    # 2. GPX POSTES (nativo do OsmAnd)
+    if bundle.gpx_bytes:
+        await message.answer_document(
+            BufferedInputFile(bundle.gpx_bytes, filename=f"{bundle.filename_base}_postes.gpx"),
+            caption="📲 <i>Postes com rota otimizada (OsmAnd, Organic Maps, Google Earth)</i>",
+        )
 
-    # Remove a mensagem de progresso
+    # 2b. GPX EQUIPAMENTOS (waypoints)
+    if bundle.gpx_equipamentos_bytes:
+        await message.answer_document(
+            BufferedInputFile(bundle.gpx_equipamentos_bytes, filename=f"{bundle.filename_base}_equipamentos.gpx"),
+            caption="⚡ <i>Equipamentos/Instalações para inspeção (OsmAnd, Organic Maps, Google Earth)</i>",
+        )
+
+    # 3. CSV POSTES
+    if bundle.total_postes > 0:
+        await message.answer_document(
+            BufferedInputFile(bundle.csv_postes_bytes, filename=f"{bundle.filename_base}_postes.csv"),
+            caption="🏗️ <i>Dados de postes (Power BI / Excel)</i>",
+        )
+
+    # 4. CSV EQUIPAMENTOS
+    if bundle.total_equipamentos > 0:
+        await message.answer_document(
+            BufferedInputFile(bundle.csv_equipamentos_bytes, filename=f"{bundle.filename_base}_equipamentos.csv"),
+            caption="⚡ <i>Dados de equipamentos (use poste_referencia para cross-reference)</i>",
+        )
+
+    # 5. TXT de inválidos (só se houver)
+    if bundle.invalidos_txt:
+        await message.answer_document(
+            BufferedInputFile(
+                bundle.invalidos_txt.encode("utf-8"),
+                filename=f"{bundle.filename_base}_invalidos.txt",
+            ),
+        )
+
     try:
         await progress.delete()
     except Exception:
@@ -108,7 +152,10 @@ async def _send_bundle(message: Message, batch_id: str) -> None:
         "Bundle enviado",
         batch_id=batch_id[:8],
         total=bundle.total,
+        postes=bundle.total_postes,
+        equipamentos=bundle.total_equipamentos,
         com_coords=bundle.com_coords,
+        otimizou=bundle.optimization is not None,
     )
 
 
@@ -158,11 +205,10 @@ async def cb_kml_download(query: CallbackQuery) -> None:
 
     batch_id = query.data.split(":", 1)[1]
 
-    # 🆕 desabilita o botão para evitar cliques duplicados
+    # desabilita o botão para evitar cliques duplicados
     try:
         await query.message.edit_reply_markup(reply_markup=None)
     except Exception:
-        pass  # se já foi editado/removido, segue o jogo
+        pass
 
     await _send_bundle(query.message, batch_id)
-

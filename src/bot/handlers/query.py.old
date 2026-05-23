@@ -206,6 +206,8 @@ async def _process_codes_input(
                 batch_id=batch.id,
                 user_tg_id=message.from_user.id,
                 chat_id=message.chat.id,
+                chat_id=message.chat.id,
+                chat_id=message.chat.id,
                 code=q.code,
                 query_type=q.query_type,
             )

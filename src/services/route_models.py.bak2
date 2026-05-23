@@ -48,13 +48,3 @@ class RouteResult:
     def ordem(self) -> List[str]:
         """IDs dos pontos na ordem otimizada (atalho conveniente)."""
         return [rp.id for rp in self.sequencia]
-
-
-@dataclass
-class RouteOptimizationResult:
-    """Resultado da otimização de rota."""
-    optimized_points: List[RoutePoint]  # Pontos na ordem otimizada
-    total_distance_m: float             # Distância total em metros
-    optimization_time_ms: float         # Tempo de otimização em ms
-    original_distance_m: float          # Distância original (ordem de entrada)
-    savings_pct: float                  # Percentual de economia

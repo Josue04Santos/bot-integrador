@@ -41,7 +41,7 @@ def create_dispatcher() -> Dispatcher:
     # Registra middlewares
     setup_middlewares(dp)
     
-    # Registra handlers
+    # Registra handlers (inclui admin)
     register_handlers(dp)
     logger.debug("Handlers registrados")
     

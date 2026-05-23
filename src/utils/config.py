@@ -3,7 +3,7 @@ Configurações centralizadas — backend-agnostic (SQLite ↔ Postgres).
 """
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     consulta_timeout: float = 30.0
     max_consultas_batch: int = 50
 
+    # --- Administração ---
+    super_admin_ids: Union[str, list[int]] = ""
+
     # ------------------------------------------------------------------
     # Validators
     # ------------------------------------------------------------------
@@ -87,6 +90,20 @@ class Settings(BaseSettings):
         """Garante que pasta do SQLite exista."""
         v.parent.mkdir(parents=True, exist_ok=True)
         return v
+
+    @field_validator("super_admin_ids", mode="before")
+    @classmethod
+    def parse_super_admin_ids(cls, v) -> list[int]:
+        """Converte string CSV em lista de inteiros."""
+        if isinstance(v, list):
+            return v
+        if isinstance(v, (str, int)):
+            if isinstance(v, int):
+                return [v]
+            if not v.strip():
+                return []
+            return [int(x.strip()) for x in v.split(",") if x.strip()]
+        return []
 
     # ------------------------------------------------------------------
     # Properties derivadas
