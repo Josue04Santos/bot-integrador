@@ -1,4 +1,4 @@
-# 🤖 Bot Integrador EQTL
+# 🤖 Bot Integrador DPL
 
 > **Bot de automação para consulta de dados de rede elétrica via Telegram**
 > Integra-se ao `@ReincidenciasBot` da EQTL Energia, processa lotes de consultas em paralelo, persiste em banco e exporta resultados como **KML (Google Earth)** + **CSV**.
