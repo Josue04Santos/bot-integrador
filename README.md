@@ -1,7 +1,7 @@
 # 🤖 Bot Integrador DPL Construções
 
 > **Bot de automação para consulta de dados de rede elétrica via Telegram**
-> Integra-se ao `@ReincidenciasBot` da DPL Construções, processa lotes de consultas em paralelo, persiste em banco e exporta resultados como **KML (Google Earth)** + **CSV**.
+> Integra-se ao `@ReincidenciasBot` da EQTL, processa lotes de consultas em paralelo, persiste em banco e exporta resultados como **KML (Google Earth)** + **CSV**.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![aiogram](https://img.shields.io/badge/aiogram-3.28-2CA5E0?logo=telegram&logoColor=white)](https://aiogram.dev/)
