@@ -1,7 +1,7 @@
 # 🤖 Bot Integrador DPL Construções
 
 > **Bot de automação para consulta de dados de rede elétrica via Telegram**
-> Integra-se ao `@ReincidenciasBot` da EQTL, processa lotes de consultas em paralelo, persiste em banco e exporta resultados como **KML (Google Earth)** + **CSV**.
+> Integra-se ao `@ReincidenciasBot` da DPL Construções, processa lotes de consultas em paralelo, persiste em banco e exporta como **KML + GPX + CSV** (OsmAnd, Google Earth, Excel).
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![aiogram](https://img.shields.io/badge/aiogram-3.28-2CA5E0?logo=telegram&logoColor=white)](https://aiogram.dev/)
@@ -67,11 +67,16 @@ Operadores de campo, despachantes e analistas da distribuidora de energia que pr
 
 ### 📍 Exportação Geográfica
 
-- ✅ **KML (Google Earth)** com placemarks agrupados por alimentador
-- ✅ **CSV** (delimitador `;`, compatível com Excel-BR)
-- ✅ Botão "📍 Baixar KML + CSV" aparece automaticamente ao concluir o lote
-- ✅ Comando manual `/kml <id_lote>` para baixar lotes antigos
-- ✅ Caption rica: total de pontos, com/sem coordenadas
+- ✅ **KML (Google Earth)** com placemarks agrupados por alimentador + geometria OSRM
+- ✅ **GPX de Postes** (OsmAnd) com rota otimizada (µ9 TSP) + navegação multi-parada
+- ✅ **GPX de Equipamentos** (novo!) com ícones contextuais:
+  - 🔴 Transformadores → Rosa (#E91E63)
+  - 🟠 Chaves Fusível → Laranja (#FF9800)
+  - 🔵 Equipamentos Genéricos → Ciano (#00BCD4)
+- ✅ **CSV** (2 arquivos: postes + equipamentos, delimitador `;`)
+- ✅ Botão "📍 Baixar" com todos os arquivos
+- ✅ Comando `/kml <id_lote>` para reterir lotes antigos
+- ✅ Coordenadas com **14 casas decimais**, compatível OsmAnd/Organic Maps/Garmin
 
 ### 🔔 Notificações Automáticas
 
@@ -93,32 +98,104 @@ Operadores de campo, despachantes e analistas da distribuidora de energia que pr
 
 ## 🏗️ Arquitetura
 
-### Visão de Alto Nível
-┌─────────────────────────────────────────────────────────────┐ │ USUÁRIO TELEGRAM │ └──────────────────────┬──────────────────────────────────────┘ │ ▼ ┌──────────────────────┐ │ BOT (aiogram 3.28) │ ← interface conversacional │ /start /help /kml │ └──────────┬───────────┘ │ enfileira ▼ ┌──────────────────────┐ │ FILA (in-memory) │ ← QueryBatch + NetworkQuery └──────────┬───────────┘ │ consome ▼ ┌──────────────────────┐ │ WORKER (asyncio) │ ← processa em paralelo └──────────┬───────────┘ │ consulta via ▼ ┌──────────────────────┐ │ USERBOT (Telethon) │ ← conversa com @ReincidenciasBot └──────────┬───────────┘ │ persiste ▼ ┌──────────────────────┐ ┌─────────────────┐ │ BANCO (SQLite/PG) │────────▶│ EXPORTERS │ │ via SQLAlchemy 2.0 │ │ KML + CSV │ └──────────────────────┘ └─────────────────┘
+```
+USUÁRIO (Telegram)
+    ↓
+BOT (aiogram 3.28)
+    ↓ enfileira
+DISPATCHER (fila async)
+    ↓ consome
+WORKER (Telethon)
+    ↓ consulta
+@ReincidenciasBot
+    ↓ persiste
+DATABASE (SQLAlchemy)
+    ↓ exporta
+EXPORTERS (KML + GPX + CSV)
+```
 
+### Camadas Técnicas
 
-
-
-### Camadas
-
-| Camada | Responsabilidade | Tecnologia |
-|--------|------------------|------------|
-| **Bot** | Interface conversacional, handlers de comandos | aiogram 3 |
-| **Userbot** | Cliente que conversa com bot terceiro | Telethon |
-| **Dispatcher** | Fila assíncrona de consultas | asyncio |
-| **Exporters** | Geração de KML + CSV | simplekml |
-| **Services** | Parser de respostas do `@ReincidenciasBot` | regex puro |
-| **Database** | Persistência ORM async | SQLAlchemy 2.0 |
-| **API** | Endpoints REST (opcional) | FastAPI |
+| Camada | Função | Tech |
+|--------|--------|------|
+| **Bot** | Interface Telegram | aiogram 3.28 |
+| **Userbot** | Consultas via Telethon | Telethon 1.43 |
+| **Dispatcher** | Fila assíncrona | asyncio |
+| **Route Opt** | TSP otimização | OR-Tools |
+| **OSRM** | Geometria real | OpenRouteService |
+| **Exporters** | Arquivos gerados | simplekml + XML |
+| **Database** | Persistência ORM | SQLAlchemy 2.0 |
+| **API** | Endpoints REST | FastAPI 0.115 |
 
 ---
 
-## 📂 Estrutura do Projeto
-bot-integrador/ ├── src/ │ ├── main.py # entry point — sobe bot + worker │ ├── config.py # configurações globais │ │ │ ├── bot/ # 🤖 BOT TELEGRAM (aiogram) │ │ ├── application.py # factory do dispatcher │ │ ├── handlers/ # comandos & callbacks │ │ │ ├── start.py # /start, /status, menu inicial │ │ │ ├── help.py # /help │ │ │ ├── query.py # fluxo POSTE / EQUIPAMENTO │ │ │ ├── export.py # /kml + botão de download │ │ │ └── whoami.py # /whoami │ │ ├── keyboards/ # teclados inline │ │ ├── middlewares/ # auth, logging, rate limit │ │ └── states/ # FSM (Finite State Machine) │ │ │ ├── userbot/ # 🛰️ CLIENTE TELETHON │ │ ├── client.py # singleton do TelegramClient │ │ ├── session_manager.py # consultas síncronas ao bot terceiro │ │ └── worker.py # loop que consome a fila │ │ │ ├── dispatcher/ # 📥 FILA DE CONSULTAS │ │ └── queue.py │ │ │ ├── exporters/ # 📦 GERAÇÃO DE ARQUIVOS │ │ ├── kml_builder.py # KML agrupado por alimentador │ │ ├── csv_builder.py # CSV com delimitador ';' │ │ ├── parser.py # extrai dados estruturados das queries │ │ └── styles.py # estilos visuais do KML │ │ │ ├── services/ # 🧠 LÓGICA DE DOMÍNIO │ │ └── parser.py # parser legado (usado por session_manager) │ │ │ ├── database/ # 🗄️ PERSISTÊNCIA │ │ ├── connection.py # engine async + session factory │ │ ├── models.py # entidades SQLAlchemy │ │ └── types.py # tipos customizados (UUID, JSON) │ │ │ ├── models/ # 📋 SCHEMAS PYDANTIC │ │ └── schemas.py # PosteData, InstalacaoData, Coordenadas │ │ │ ├── api/ # 🌐 API REST (FastAPI) │ │ ├── main.py │ │ └── routes/ │ │ │ └── utils/ # 🔧 UTILITÁRIOS │ ├── config.py # Settings (pydantic-settings) │ └── logger.py # logger estruturado (structlog) │ ├── data/ # 🗃️ banco SQLite + sessões Telethon ├── exports/ # 📂 arquivos KML/CSV gerados ├── logs/ # 📝 logs estruturados ├── alembic/ # 🔄 migrations do banco │ ├── .env.example # template de variáveis ├── requirements.txt # dependências Python ├── alembic.ini # configuração de migrations └── README.md
+## 📂 Estrutura
 
-
-
-
+```
+bot-integrador/
+├── src/
+│   ├── main.py                          # entry point
+│   ├── config.py                        # settings
+│   │
+│   ├── bot/                             # 🤖 TELEGRAM BOT
+│   │   ├── application.py
+│   │   ├── handlers/
+│   │   │   ├── start.py
+│   │   │   ├── query.py                 # postes + equipamentos
+│   │   │   ├── export.py                # download KML/GPX/CSV
+│   │   │   └── whoami.py
+│   │   ├── keyboards/
+│   │   ├── middlewares/                 # auth + logging
+│   │   └── states/                      # FSM
+│   │
+│   ├── userbot/                         # 🛰️ TELETHON CLIENT
+│   │   ├── client.py
+│   │   ├── worker.py                    # loop consultas
+│   │   └── session_manager.py
+│   │
+│   ├── dispatcher/                      # 📥 FILA
+│   │   └── queue.py
+│   │
+│   ├── exporters/                       # 📦 ARQUIVOS
+│   │   ├── gpx_builder.py               # GPX postes + rota
+│   │   ├── gpx_equipamentos.py          # GPX equipamentos
+│   │   ├── kml_builder.py
+│   │   ├── csv_builder.py               # CSV postes
+│   │   ├── csv_equipamentos.py          # CSV equipamentos
+│   │   ├── parser.py
+│   │   ├── parser_equipamento.py
+│   │   ├── adapter.py                   # → route optimizer
+│   │   └── styles.py
+│   │
+│   ├── services/                        # 🧠 LÓGICA
+│   │   ├── route_optimizer.py           # µ9 TSP
+│   │   ├── osrm_client.py               # geometria real
+│   │   ├── route_models.py
+│   │   └── parser.py
+│   │
+│   ├── database/                        # 🗄️ PERSISTÊNCIA
+│   │   ├── models.py                    # SQLAlchemy
+│   │   ├── connection.py
+│   │   └── types.py
+│   │
+│   ├── api/                             # 🌐 REST (FastAPI)
+│   │   ├── main.py
+│   │   └── routes/
+│   │
+│   └── utils/
+│       ├── config.py
+│       └── logger.py                    # structlog
+│
+├── data/                                # 🗃️ SQLite
+├── exports/                             # 📂 KML/GPX/CSV
+├── logs/                                # 📝 estruturados
+├── alembic/                             # 🔄 migrations
+│
+├── .env.example
+├── requirements.txt
+├── alembic.ini
+└── README.md
+```
 ---
 
 ## 🚀 Quickstart
