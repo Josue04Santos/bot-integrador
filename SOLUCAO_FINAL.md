@@ -289,5 +289,5 @@ R: Testado até 500+ pontos. OsmAnd suporta sem problemas.
 
 **🚀 Seu bot agora está 100% funcional para roterização no OsmAnd!**
 
-Desenvolvido com ❤️ — Bot Integrador EQTL  
+Desenvolvido com ❤️ — Bot Integrador DPL Construções  
 🤖 Python 3.11+ | aiogram | Telethon | SQLAlchemy | OR-Tools | OSRM

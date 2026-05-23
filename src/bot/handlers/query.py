@@ -34,7 +34,7 @@ MAX_TXT_SIZE_BYTES = 256 * 1024  # 256 KB
 
 # Regex: separa por vírgula, ponto-vírgula, espaço, tab, quebra de linha
 _SEP_RE = re.compile(r"[,;\s]+")
-# Código válido: 3 a 20 chars alfanuméricos (ajustar se EQTL tiver formato específico)
+# Código válido: 3 a 20 chars alfanuméricos (ajustar se DPL tiver formato específico)
 _CODE_RE = re.compile(r"^[A-Za-z0-9\-_]{3,20}$")
 
 

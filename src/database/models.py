@@ -1,5 +1,5 @@
 """
-Modelos SQLAlchemy do Bot Integrador — domínio EQTL/DPL.
+Modelos SQLAlchemy do Bot Integrador — domínio DPL Construções.
 
 Tabelas:
     - authorized_users     → whitelist de usuários do bot DPL

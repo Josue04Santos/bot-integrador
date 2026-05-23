@@ -204,7 +204,7 @@ def build_gpx(
     <name>Lote {xml_escape(batch_id[:8])}</name>
     <desc>Rota de inspeção de postes — {len(postes_ordenados)} paradas{' (otimizada)' if is_optimized else ''}</desc>
     <time>{now}</time>
-    <keywords>EQTL, Inspeção, Postes, {profile.capitalize()}</keywords>
+    <keywords>DPL Construções, Inspeção, Postes, {profile.capitalize()}</keywords>
     <extensions>
       <osmand:routing_profile>{xml_escape(profile)}</osmand:routing_profile>
       <osmand:route_type>inspection</osmand:route_type>

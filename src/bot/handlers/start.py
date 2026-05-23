@@ -31,7 +31,7 @@ async def cmd_start(message: Message, auth_user_full_name: str | None) -> None:
 
     welcome_text = (
         f"👋 <b>Olá, {nome}!</b>\n\n"
-        "Bem-vindo ao <b>Bot Integrador EQTL</b>.\n\n"
+        "Bem-vindo ao <b>Bot Integrador DPL Construções</b>.\n\n"
         "🔍 <b>O que você quer consultar?</b>\n"
         "Escolha abaixo o tipo de consulta:\n\n"
         "🏗️ <b>POSTE</b> — consulta dados de um poste pelo código\n"

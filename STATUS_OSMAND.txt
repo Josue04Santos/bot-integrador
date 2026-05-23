@@ -83,6 +83,6 @@ Seu bot já gera GPX com rotas automáticas.
 Próximo ciclo de consultas terá os arquivos corretos!
 
 ═══════════════════════════════════════════════════════════════════════════════
-Desenvolvido com ❤️  — Bot Integrador EQTL
+Desenvolvido com ❤️  — Bot Integrador DPL Construções
 Stack: Python 3.11+ | aiogram 3.28 | Telethon 1.43 | SQLAlchemy 2.0 | OR-Tools
 ═══════════════════════════════════════════════════════════════════════════════

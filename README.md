@@ -1,7 +1,7 @@
-# 🤖 Bot Integrador EQTL
+# 🤖 Bot Integrador DPL Construções
 
 > **Bot de automação para consulta de dados de rede elétrica via Telegram**
-> Integra-se ao `@ReincidenciasBot` da EQTL Energia, processa lotes de consultas em paralelo, persiste em banco e exporta resultados como **KML (Google Earth)** + **CSV**.
+> Integra-se ao `@ReincidenciasBot` da DPL Construções, processa lotes de consultas em paralelo, persiste em banco e exporta resultados como **KML (Google Earth)** + **CSV**.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![aiogram](https://img.shields.io/badge/aiogram-3.28-2CA5E0?logo=telegram&logoColor=white)](https://aiogram.dev/)
@@ -32,7 +32,7 @@
 
 ## 🎯 Visão Geral
 
-O **Bot Integrador EQTL** é uma ponte automatizada entre operadores de campo e o sistema de consulta de rede elétrica da EQTL Energia. Ele resolve três problemas operacionais:
+O **Bot Integrador DPL Construções** é uma ponte automatizada entre operadores de campo e o sistema de consulta de rede elétrica da DPL Construções. Ele resolve três problemas operacionais:
 
 | Problema | Solução |
 |----------|---------|
@@ -454,7 +454,7 @@ grep -i "worker" logs/bot.log | tail -50
 # Reinicie o bot:
 # Ctrl+C e python -m src.main
 📜 Licença
-Projeto proprietário — uso interno EQTL Energia. Distribuição, cópia ou uso externo requer autorização expressa.
+Projeto proprietário — uso interno DPL Construções. Distribuição, cópia ou uso externo requer autorização expressa.
 
 👥 Créditos
 Desenvolvimento: Josué Santos

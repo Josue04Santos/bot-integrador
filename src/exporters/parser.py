@@ -1,5 +1,5 @@
 """
-Parser do raw_response do bot remoto EQTL.
+Parser do raw_response do bot remoto DPL Construções.
 
 Extrai: código, lat, lng, alimentador(es), cabo(s), estruturas MT/BT.
 
