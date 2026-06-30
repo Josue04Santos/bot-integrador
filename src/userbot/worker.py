@@ -24,6 +24,24 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Padrões que indicam que o código não existe no sistema externo
+_NAO_CADASTRADO_PATTERNS = (
+    "não cadastrado",
+    "nao cadastrado",
+    "não encontrado",
+    "nao encontrado",
+    "código inválido",
+    "codigo invalido",
+    "não existe",
+    "nao existe",
+)
+
+
+def _is_not_found(response: str) -> bool:
+    """Retorna True se a resposta indica que o código não está cadastrado."""
+    lower = response.lower()
+    return any(p in lower for p in _NAO_CADASTRADO_PATTERNS)
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -91,9 +109,11 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
+    not_found = response is not None and _is_not_found(response)
+
     async with db.session() as session:
         query = await session.get(NetworkQuery, item.query_id)
-        if response:
+        if response and not not_found:
             query.status = "received"
             query.raw_response = response
             query.received_at = _utcnow()
@@ -110,14 +130,28 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
                 longitude=query.longitude,
                 alimentador=query.alimentador,
             )
+        elif not_found:
+            # Resposta veio, mas o código não existe no sistema externo
+            query.status = "error"
+            query.error_message = "não cadastrado"
+            query.raw_response = response  # guarda para auditoria
         elif error_msg:
             query.status = "error"
             query.error_message = error_msg
         else:
             query.status = "timeout"
 
-    await _update_batch(item.batch_id, success=bool(response), error=bool(error_msg))
-    await _notify_user(bot, item, response, error_msg, cache_info=None)
+    await _update_batch(
+        item.batch_id,
+        success=bool(response and not not_found),
+        error=bool(error_msg or not_found),
+    )
+    await _notify_user(
+        bot, item,
+        response=response if (response and not not_found) else None,
+        error=f"Código não cadastrado no sistema" if not_found else error_msg,
+        cache_info=None,
+    )
     await _check_batch_complete(bot, item.batch_id, item.chat_id)
 
 
