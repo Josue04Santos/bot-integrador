@@ -211,6 +211,8 @@ async def _notify_batch_complete(bot: Bot, batch_id: str, chat_id: int) -> None:
     else:
         icon, status_text = "⚠️", "Lote concluído sem sucesso"
 
+    tem_sucesso = ok > 0
+
     text = (
         f"{icon} <b>{status_text}</b>\n\n"
         f"🆔 Lote: <code>#{batch_id[:8]}</code>\n"
@@ -219,11 +221,15 @@ async def _notify_batch_complete(bot: Bot, batch_id: str, chat_id: int) -> None:
         f"❌ Erros: <b>{err}</b>\n"
         f"⏱ Timeouts: <b>{timeout}</b>\n"
         f"{duration_str}"
-        f"\n<i>Clique abaixo para baixar KML (Google Earth) + CSV.</i>"
+        + (f"\n<i>Clique abaixo para baixar KML (Google Earth) + CSV.</i>" if tem_sucesso else
+           f"\n<i>Nenhum resultado disponível para exportar.</i>")
     )
 
     try:
-        await bot.send_message(chat_id, text, reply_markup=kml_download_kb(batch_id))
+        await bot.send_message(
+            chat_id, text,
+            reply_markup=kml_download_kb(batch_id) if tem_sucesso else None,
+        )
         logger.info("Batch finalizado", batch_id=batch_id[:8], ok=ok, total=total)
     except Exception:
         logger.exception("Falha ao notificar conclusão do batch", batch_id=batch_id[:8])

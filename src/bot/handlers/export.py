@@ -79,6 +79,10 @@ async def _send_bundle(message: Message, batch_id: str) -> None:
         await progress.edit_text("⚠️ Este lote não tem respostas ainda.")
         return
 
+    if bundle.com_coords == 0 and bundle.total_postes == 0 and bundle.total_equipamentos == 0:
+        await progress.edit_text("⚠️ Nenhum resultado válido para exportar neste lote.")
+        return
+
     # ═══ Caption do KML (com stats da otimização) ═══
     caption_parts = [
         f"📦 <b>Lote</b> <code>#{batch_id[:8]}</code>",
