@@ -55,6 +55,21 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
         cached = await cache_service.lookup(session, item.code, item.query_type)
 
     if cached is not None:
+        # Resposta em cache pode ser "não cadastrado" — trata como falha
+        if _is_not_found(cached.raw_response or ""):
+            async with db.session() as session:
+                query = await session.get(NetworkQuery, item.query_id)
+                if query:
+                    query.status = "error"
+                    query.error_message = "não cadastrado"
+                    query.raw_response = cached.raw_response
+            await _update_batch(item.batch_id, error=True)
+            await _notify_user(bot, item, response=None,
+                               error="Código não cadastrado no sistema",
+                               cache_info=None)
+            await _check_batch_complete(bot, item.batch_id, item.chat_id)
+            return
+
         fresh = cache_service.is_fresh(cached)
         age = cache_service.age_label(cached)
 
