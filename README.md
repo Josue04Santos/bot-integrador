@@ -51,6 +51,17 @@ Operadores de campo, despachantes e analistas da distribuidora de energia que pr
 
 ## ✨ Funcionalidades
 
+### 🗄️ Cache Inteligente de Consultas
+
+- ✅ **1 registro por código único** no banco — sem duplicatas (`code_cache`)
+- ✅ Consulta repetida entregue **instantaneamente** do banco, sem chamar o bot externo
+- ✅ **TTL de 7 dias** — dados com menos de 7 dias são servidos do cache; acima disso, o cache é entregue e atualizado em **background** de forma silenciosa
+- ✅ Três cenários cobertos automaticamente:
+  - Código no cache e fresco → entrega imediata
+  - Código no cache mas desatualizado → entrega imediata + atualização em background
+  - Código novo → consulta o bot externo, salva e entrega
+- ✅ Indicador visual no resultado: `📦 cache (2h atrás)` ou `📦 cache desatualizado (8d atrás) — atualizando…`
+
 ### 🔍 Consultas em Lote
 
 - ✅ Aceita **1 código, vários códigos** (separados por vírgula/espaço) ou **arquivo `.txt`**
@@ -458,6 +469,7 @@ python -m src.main
  Bloco 1: Exporters (KML agrupado por alimentador + CSV BR)
  Bloco 2: Handler /kml + botão inline
  Bloco 3: Notificação automática de conclusão
+ µ9 — Cache inteligente de consultas (code_cache + TTL 7d + refresh em background)
 🔄 Em Backlog
  µ9 — Polimento UX: distinguir "não cadastrado" de sucesso
  µ10 — Comando /grant e /revoke para admins

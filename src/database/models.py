@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     BigInteger,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -266,3 +267,40 @@ class AgentRun(Base):
 
     def __repr__(self) -> str:
         return f"<AgentRun {self.agent_type} status={self.status} started={self.started_at}>"
+
+
+# ============================================================================
+# 7) CODE CACHE — 1 linha por código único (upsert), fonte de verdade do cache
+# ============================================================================
+class CodeCache(Base):
+    """
+    Armazena o resultado mais recente de cada código consultado.
+    Regra: 1 linha por (code + query_type). Nunca cresce com duplicatas.
+    - Consulta nova  → INSERT
+    - Consulta repetida → UPDATE (upsert)
+    """
+    __tablename__ = "code_cache"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    query_type: Mapped[str] = mapped_column(String(20), nullable=False)  # poste | instalacao
+
+    raw_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parsed_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    alimentador: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    fetch_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    first_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    last_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("code", "query_type", name="uq_code_cache_code_type"),
+        Index("ix_code_cache_code_type", "code", "query_type"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CodeCache code={self.code} type={self.query_type} fetches={self.fetch_count}>"

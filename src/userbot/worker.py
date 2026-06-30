@@ -1,13 +1,12 @@
 """
 Worker que consome a fila e dispara consultas via UserBot.
 
-Fluxo:
-1. Recebe QueueItem da fila
-2. Marca NetworkQuery como 'sent'
-3. Chama userbot.query_poste() / query_equipamento()
-4. Salva raw_response e marca como 'received' (ou 'timeout'/'error')
-5. Atualiza contadores do QueryBatch
-6. Notifica o usuário via bot DPL
+Fluxo com cache (3 cenários):
+  1. Código no cache e fresco (< 7d)  → entrega imediata, sem chamar bot externo
+  2. Código no cache mas stale (≥ 7d) → entrega do cache + atualiza em background
+  3. Código não está no cache         → consulta bot externo, faz upsert, entrega
+
+A tabela code_cache tem 1 linha por código — nunca cria duplicatas.
 """
 
 import asyncio
@@ -19,6 +18,7 @@ from aiogram import Bot
 from src.database.connection import db
 from src.database.models import NetworkQuery, QueryBatch
 from src.dispatcher import query_queue, QueueItem
+from src.services import cache_service
 from src.userbot import userbot
 from src.utils.logger import get_logger
 
@@ -30,10 +30,44 @@ def _utcnow() -> datetime:
 
 
 async def _process_one(item: QueueItem, bot: Bot) -> None:
-    """Processa uma única consulta."""
-    started = time.perf_counter()
+    """Processa uma única consulta com verificação de cache."""
 
-    # 1) Marca como 'sent'
+    # ── Verifica cache ──────────────────────────────────────────────────────
+    async with db.session() as session:
+        cached = await cache_service.lookup(session, item.code, item.query_type)
+
+    if cached is not None:
+        fresh = cache_service.is_fresh(cached)
+        age = cache_service.age_label(cached)
+
+        # Preenche a NetworkQuery do batch com dados do cache
+        async with db.session() as session:
+            query = await session.get(NetworkQuery, item.query_id)
+            if query:
+                query.status = "received"
+                query.raw_response = cached.raw_response
+                query.parsed_data = cached.parsed_data
+                query.latitude = cached.latitude
+                query.longitude = cached.longitude
+                query.alimentador = cached.alimentador
+                query.received_at = _utcnow()
+                query.response_ms = 0
+
+        await _update_batch(item.batch_id, success=True)
+
+        if fresh:
+            logger.info("Cache hit (fresco)", code=item.code, age=age)
+            cache_info = f"📦 cache ({age})"
+        else:
+            logger.info("Cache stale — refresh em background", code=item.code, age=age)
+            cache_info = f"📦 cache desatualizado ({age}) — atualizando…"
+            asyncio.create_task(_background_refresh(item.code, item.query_type))
+
+        await _notify_user(bot, item, cached.raw_response, error=None, cache_info=cache_info)
+        await _check_batch_complete(bot, item.batch_id, item.chat_id)
+        return
+
+    # ── Cache miss: consulta o bot externo ──────────────────────────────────
     async with db.session() as session:
         query = await session.get(NetworkQuery, item.query_id)
         if not query:
@@ -41,9 +75,8 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
             return
         query.status = "sent"
         query.sent_at = _utcnow()
-        await session.commit()
 
-    # 2) Dispara consulta no UserBot
+    started = time.perf_counter()
     try:
         if item.query_type == "instalacao":
             response = await userbot.query_equipamento(item.code)
@@ -58,91 +91,125 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
-    # 3) Atualiza query + batch
-    batch_just_completed = False  # flag
-
     async with db.session() as session:
         query = await session.get(NetworkQuery, item.query_id)
-        batch = await session.get(QueryBatch, item.batch_id)
-
         if response:
             query.status = "received"
             query.raw_response = response
             query.received_at = _utcnow()
             query.response_ms = elapsed_ms
-            batch.success_count += 1
+
+            # Upsert no cache — 1 linha por código, sem duplicatas
+            await cache_service.upsert(
+                session,
+                code=item.code,
+                query_type=item.query_type,
+                raw_response=response,
+                parsed_data=query.parsed_data,
+                latitude=query.latitude,
+                longitude=query.longitude,
+                alimentador=query.alimentador,
+            )
         elif error_msg:
             query.status = "error"
             query.error_message = error_msg
-            batch.failure_count += 1
         else:
             query.status = "timeout"
-            batch.timeout_count += 1
 
-        # Fecha batch se acabou
+    await _update_batch(item.batch_id, success=bool(response), error=bool(error_msg))
+    await _notify_user(bot, item, response, error_msg, cache_info=None)
+    await _check_batch_complete(bot, item.batch_id, item.chat_id)
+
+
+async def _background_refresh(code: str, query_type: str) -> None:
+    """Atualiza silenciosamente um cache stale — sem notificar o usuário."""
+    logger.info("Background refresh iniciado", code=code)
+    try:
+        if query_type == "instalacao":
+            response = await userbot.query_equipamento(code)
+        else:
+            response = await userbot.query_poste(code)
+
+        if response:
+            async with db.session() as session:
+                await cache_service.upsert(
+                    session,
+                    code=code,
+                    query_type=query_type,
+                    raw_response=response,
+                )
+            logger.info("Background refresh concluído", code=code)
+        else:
+            logger.warning("Background refresh sem resposta", code=code)
+    except Exception:
+        logger.exception("Falha no background refresh", code=code)
+
+
+async def _update_batch(
+    batch_id: str,
+    success: bool = False,
+    error: bool = False,
+) -> None:
+    """Atualiza contadores do batch."""
+    async with db.session() as session:
+        batch = await session.get(QueryBatch, batch_id)
+        if not batch:
+            return
+        if success:
+            batch.success_count += 1
+        elif error:
+            batch.failure_count += 1
+        else:
+            batch.timeout_count += 1
+        if not batch.started_at:
+            batch.started_at = _utcnow()
+        batch.status = "running"
+
+
+async def _check_batch_complete(bot: Bot, batch_id: str, chat_id: int) -> None:
+    """Verifica se o batch terminou e dispara notificação de conclusão."""
+    batch_just_completed = False
+    async with db.session() as session:
+        batch = await session.get(QueryBatch, batch_id)
+        if not batch:
+            return
         done = batch.success_count + batch.failure_count + batch.timeout_count
-        was_completed = batch.status == "completed"
-        if done >= batch.total_codes:
+        if done >= batch.total_codes and batch.status != "completed":
             batch.status = "completed"
             batch.finished_at = _utcnow()
-            batch_just_completed = not was_completed  # dispara só 1x
-        else:
-            batch.status = "running"
-            if not batch.started_at:
-                batch.started_at = _utcnow()
+            batch_just_completed = True
 
-        await session.commit()
-
-    # 4) Notifica o usuário (resultado individual)
-    await _notify_user(bot, item, response, error_msg)
-
-    # 5) Se o batch acabou agora, envia resumo + botão KML
     if batch_just_completed:
-        await _notify_batch_complete(bot, item.batch_id, item.chat_id)  # 🆕 chat_id
+        await _notify_batch_complete(bot, batch_id, chat_id)
 
 
-async def _notify_batch_complete(
-    bot: Bot,
-    batch_id: str,
-    chat_id: int,  # 🆕 agora recebe chat_id ao invés de user_tg_id
-) -> None:
-    """
-    Envia mensagem de conclusão do lote + botão de download KML/CSV.
-
-    Disparado uma única vez quando a última query do batch é processada.
-    """
-    from src.bot.keyboards.export import kml_download_kb  # import lazy: evita ciclo
+async def _notify_batch_complete(bot: Bot, batch_id: str, chat_id: int) -> None:
+    """Envia resumo de conclusão do lote + botão de download."""
+    from src.bot.keyboards.export import kml_download_kb
 
     async with db.session() as session:
         batch = await session.get(QueryBatch, batch_id)
         if not batch:
-            logger.error("Batch sumiu antes da notificação", batch_id=batch_id[:8])
             return
-
         total = batch.total_codes
         ok = batch.success_count
         err = batch.failure_count
         timeout = batch.timeout_count
-
-        # Calcula duração se possível
         duration_str = ""
         if batch.started_at and batch.finished_at:
             delta = (batch.finished_at - batch.started_at).total_seconds()
-            if delta < 60:
-                duration_str = f"⏱ Duração: <b>{delta:.1f}s</b>\n"
-            else:
-                duration_str = f"⏱ Duração: <b>{delta/60:.1f}min</b>\n"
+            duration_str = (
+                f"⏱ Duração: <b>{delta:.1f}s</b>\n"
+                if delta < 60
+                else f"⏱ Duração: <b>{delta / 60:.1f}min</b>\n"
+            )
 
-    # Emoji do cabeçalho conforme taxa de sucesso
     if ok == total:
-        icon = "🎉"
-        status_text = "Lote concluído com sucesso!"
+        icon, status_text = "🎉", "Lote concluído com sucesso!"
     elif ok > 0:
-        icon = "✅"
-        status_text = "Lote concluído (com falhas)"
+        icon, status_text = "✅", "Lote concluído (com falhas)"
     else:
-        icon = "⚠️"
-        status_text = "Lote concluído sem sucesso"
+        icon, status_text = "⚠️", "Lote concluído sem sucesso"
 
     text = (
         f"{icon} <b>{status_text}</b>\n\n"
@@ -156,23 +223,10 @@ async def _notify_batch_complete(
     )
 
     try:
-        await bot.send_message(
-            chat_id,  # 🆕 ENVIA PRO CHAT CORRETO (PV OU GRUPO)
-            text,
-            reply_markup=kml_download_kb(batch_id),
-        )
-        logger.info(
-            "Batch finalizado — notificação enviada",
-            batch_id=batch_id[:8],
-            ok=ok,
-            total=total,
-        )
+        await bot.send_message(chat_id, text, reply_markup=kml_download_kb(batch_id))
+        logger.info("Batch finalizado", batch_id=batch_id[:8], ok=ok, total=total)
     except Exception:
-        logger.exception(
-            "Falha ao notificar conclusão do batch",
-            batch_id=batch_id[:8],
-            chat_id=chat_id,
-        )
+        logger.exception("Falha ao notificar conclusão do batch", batch_id=batch_id[:8])
 
 
 async def _notify_user(
@@ -180,28 +234,29 @@ async def _notify_user(
     item: QueueItem,
     response: str | None,
     error: str | None,
+    cache_info: str | None,
 ) -> None:
-    """Envia o resultado ao usuário no Telegram."""
+    """Envia o resultado individual ao usuário."""
     tipo_label = "🏗️ POSTE" if item.query_type == "poste" else "⚡ EQUIPAMENTO"
     header = f"{tipo_label} • <code>{item.code}</code>"
+    cache_line = f"\n<i>{cache_info}</i>" if cache_info else ""
 
     if response:
-        # Telegram tem limite de 4096 chars; trunca por segurança
         body = response if len(response) < 3800 else response[:3800] + "\n\n[...truncado]"
-        text = f"✅ <b>Resultado</b>\n{header}\n\n<pre>{body}</pre>"
+        text = f"✅ <b>Resultado</b>{cache_line}\n{header}\n\n<pre>{body}</pre>"
     elif error:
         text = f"❌ <b>Erro</b>\n{header}\n\n<code>{error}</code>"
     else:
         text = f"⏱ <b>Timeout</b>\n{header}\n\nSem resposta do bot remoto."
 
     try:
-        await bot.send_message(item.chat_id, text)  # 🆕 ENVIA PRO CHAT CORRETO
+        await bot.send_message(item.chat_id, text)
     except Exception:
         logger.exception("Falha ao notificar user", chat_id=item.chat_id)
 
 
 async def worker_loop(bot: Bot) -> None:
-    """Loop infinito do worker. Roda no asyncio.gather do main."""
+    """Loop infinito do worker."""
     logger.info("Worker do UserBot iniciado")
     while True:
         item = await query_queue.get()
