@@ -155,14 +155,20 @@ class UserbotClient:
             return await self.query_equipamento(codigo, timeout)
         return await self.query_poste(codigo, timeout)
 
+    # Prompts exatos que o bot externo envia para cada comando
+    _PROMPTS_ESPERADOS = {
+        "/PTE": "informe o número do poste",
+        "/EQP": "informe o número do componente",
+    }
+
     async def _send_conversational_query(
         self, comando: str, codigo: str, timeout: float = None
     ) -> Optional[str]:
         """
         Envia consulta em fluxo conversacional:
         1. Envia comando (ex: /PTE)
-        2. Aguarda prompt do bot
-        3. Envia código
+        2. Aguarda e VALIDA o prompt do bot antes de enviar o código
+        3. Envia código apenas quando o bot está esperando
         4. Aguarda resposta final
         """
         if not self._connected:
@@ -170,10 +176,9 @@ class UserbotClient:
             return None
 
         timeout = timeout or float(settings.bot_terceiro_timeout)
+        prompt_esperado = self._PROMPTS_ESPERADOS.get(comando, "")
 
-        # Aguarda mensagens atrasadas chegarem antes de limpar a fila.
-        # Necessário quando o item anterior foi servido do cache (muito rápido)
-        # e mensagens residuais da conversa anterior ainda estão em trânsito.
+        # Aguarda mensagens atrasadas e descarta tudo antes de começar
         await asyncio.sleep(0.8)
         while not self._response_queue.empty():
             dropped = self._response_queue.get_nowait()
@@ -186,17 +191,40 @@ class UserbotClient:
             await self._client.send_message(settings.bot_terceiro_username, comando)
             logger.debug(f"Enviado comando: {comando}")
 
-            # Aguarda prompt do bot (ex: "Informe o número do poste:")
-            try:
-                prompt = await asyncio.wait_for(self._response_queue.get(), timeout=timeout)
-                logger.debug(f"Prompt recebido: {prompt}")
-            except asyncio.TimeoutError:
-                logger.warning(f"Timeout esperando prompt após {comando}")
+            # ETAPA 2: Aguarda e VALIDA o prompt
+            # Descarta mensagens que não sejam o prompt esperado (residuais)
+            prompt_recebido = False
+            deadline = asyncio.get_event_loop().time() + timeout
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    logger.warning(f"Timeout aguardando prompt de '{comando}'")
+                    return None
+                try:
+                    msg = await asyncio.wait_for(
+                        self._response_queue.get(), timeout=remaining
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout aguardando prompt de '{comando}'")
+                    return None
+
+                if prompt_esperado and prompt_esperado in msg.lower():
+                    logger.debug(f"Prompt validado: '{msg.strip()}'")
+                    prompt_recebido = True
+                    break
+                else:
+                    # Mensagem inesperada — descarta e aguarda o prompt correto
+                    logger.warning(
+                        f"Mensagem inesperada descartada (aguardando prompt): "
+                        f"'{msg[:60]}'"
+                    )
+
+            if not prompt_recebido:
                 return None
 
-            # ETAPA 2: Envia o código
+            # ETAPA 3: Prompt confirmado — agora é seguro enviar o código
             await self._client.send_message(settings.bot_terceiro_username, codigo)
-            logger.debug(f"Enviado código: {codigo}")
+            logger.debug(f"Código enviado após prompt validado: {codigo}")
 
             # ETAPA 3: Coleta resposta final (pode ser múltiplas mensagens)
             messages: List[str] = []
