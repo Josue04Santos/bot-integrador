@@ -24,6 +24,23 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Controle de cadência — garante intervalo mínimo entre consultas reais ao bot externo.
+# Necessário porque cache hits são instantâneos e a fila avança rápido demais,
+# deixando o bot externo em estado inconsistente.
+_last_real_query_time: float = 0.0
+_MIN_INTERVAL_BETWEEN_REAL_QUERIES = 8.0  # segundos
+
+
+async def _wait_for_bot_ready() -> None:
+    """Aguarda o intervalo mínimo desde a última consulta real ao bot externo."""
+    global _last_real_query_time
+    elapsed = time.monotonic() - _last_real_query_time
+    if elapsed < _MIN_INTERVAL_BETWEEN_REAL_QUERIES:
+        wait = _MIN_INTERVAL_BETWEEN_REAL_QUERIES - elapsed
+        logger.info(f"Cadência: aguardando {wait:.1f}s antes de chamar bot externo")
+        await asyncio.sleep(wait)
+
+
 # Padrões que indicam resposta inválida do bot externo
 _NAO_CADASTRADO_PATTERNS = (
     "não cadastrado",
@@ -104,6 +121,9 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
         return
 
     # ── Cache miss: consulta o bot externo ──────────────────────────────────
+    # Garante cadência mínima para não sobrecarregar o bot externo
+    await _wait_for_bot_ready()
+
     async with db.session() as session:
         query = await session.get(NetworkQuery, item.query_id)
         if not query:
@@ -113,6 +133,7 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
         query.sent_at = _utcnow()
 
     started = time.perf_counter()
+    _last_real_query_time = time.monotonic()
     try:
         if item.query_type == "instalacao":
             response = await userbot.query_equipamento(item.code)
