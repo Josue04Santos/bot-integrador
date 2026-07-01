@@ -1,9 +1,27 @@
 """
 Cliente Userbot usando Telethon.
 Sessão persistida no PostgreSQL (sem SQLite/arquivo local).
+
+Fluxo conversacional com o @ReincidenciasBot (2 interações):
+
+  INTERAÇÃO 1 — Poste (/PTE):
+    Nós  →  /PTE
+    Bot  ←  "Informe o número do poste:"
+    Nós  →  {codigo}
+    Bot  ←  dados do poste  (ou "Poste não cadastrado.")
+
+  INTERAÇÃO 2 — Equipamento (/EQP):
+    Nós  →  /EQP
+    Bot  ←  "Informe o número do componente:"
+    Nós  →  {codigo}
+    Bot  ←  dados do equipamento  (ou "Componente não cadastrado.")
+
+Estado da conversa rastreado explicitamente:
+    IDLE → AGUARDA_PROMPT → AGUARDA_RESPOSTA → IDLE
 """
 
 import asyncio
+from enum import Enum
 from typing import Optional, List
 
 from telethon import TelegramClient, events
@@ -41,28 +59,40 @@ _SQL_UPSERT = sa.text("""
 """)
 
 
+class _Estado(Enum):
+    """Estado da conversa com o bot externo."""
+    IDLE             = "idle"
+    AGUARDA_PROMPT   = "aguarda_prompt"    # enviamos /PTE ou /EQP, aguardando "Informe..."
+    AGUARDA_RESPOSTA = "aguarda_resposta"  # enviamos o código, aguardando dados
+
+
+# Prompts exatos que o bot externo envia (texto em minúsculo para comparação)
+_PROMPTS = {
+    "/PTE": "informe o número do poste",
+    "/EQP": "informe o número do componente",
+}
+
+
 class UserbotClient:
     """Cliente Telegram Userbot — sessão no PostgreSQL."""
 
-    SESSION_ID = "userbot"  # chave fixa na tabela telethon_sessions
+    SESSION_ID = "userbot"
 
     def __init__(self):
         self._client: Optional[TelegramClient] = None
         self._connected = False
-        self._response_queue: asyncio.Queue = asyncio.Queue()
-        self._waiting_response = False
+        self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self._estado = _Estado.IDLE
 
     # ─────────────────────────────────────────────────────────
     # Persistência da sessão (Postgres)
     # ─────────────────────────────────────────────────────────
     async def _ensure_table(self) -> None:
-        """Garante que a tabela telethon_sessions existe."""
         async with db.session() as session:
             await session.execute(sa.text(_DDL_TELETHON_SESSIONS))
             await session.commit()
 
     async def _load_session_string(self) -> str:
-        """Carrega string da sessão do Postgres (ou '' se não existir)."""
         async with db.session() as session:
             result = await session.execute(_SQL_LOAD, {"sid": self.SESSION_ID})
             row = result.first()
@@ -73,16 +103,12 @@ class UserbotClient:
         return ""
 
     async def _save_session_string(self) -> None:
-        """Salva a string da sessão atual no Postgres."""
         if not self._client:
             return
         try:
             session_str = self._client.session.save()
             async with db.session() as session:
-                await session.execute(
-                    _SQL_UPSERT,
-                    {"sid": self.SESSION_ID, "data": session_str},
-                )
+                await session.execute(_SQL_UPSERT, {"sid": self.SESSION_ID, "data": session_str})
                 await session.commit()
             logger.debug("Sessão Telethon persistida no Postgres")
         except Exception as e:
@@ -92,218 +118,171 @@ class UserbotClient:
     # Ciclo de vida
     # ─────────────────────────────────────────────────────────
     async def start(self) -> bool:
-        """Inicia conexão com Telegram (sessão no Postgres)."""
         try:
-            # 1) Garante tabela + carrega sessão existente
             await self._ensure_table()
             session_str = await self._load_session_string()
-
-            # 2) Cria cliente com StringSession (sem arquivo .session)
             self._client = TelegramClient(
                 StringSession(session_str),
                 settings.telegram_api_id,
                 settings.telegram_api_hash,
             )
-
-            # 3) Login (interativo apenas se sessão vazia/inválida)
             await self._client.start(phone=settings.telegram_phone)
-
-            # 4) Salva sessão (pode ter sido criada/atualizada no login)
             await self._save_session_string()
-
             me = await self._client.get_me()
             logger.info(f"Userbot conectado como: {me.first_name} (@{me.username})")
-
-            self._setup_handlers()
+            self._setup_handler()
             self._connected = True
             return True
-
         except Exception as e:
             logger.error(f"Erro ao conectar userbot: {e}")
             return False
 
-    def _setup_handlers(self) -> None:
-        """Configura handlers de mensagens."""
+    def _setup_handler(self) -> None:
+        """
+        Handler de mensagens do bot externo.
+
+        Só aceita mensagens quando NÃO estamos em IDLE.
+        Isso garante que mensagens atrasadas ou fora de hora
+        sejam descartadas silenciosamente.
+        """
         @self._client.on(events.NewMessage(
             from_users=settings.bot_terceiro_username,
             incoming=True,
         ))
-        async def handle_bot_response(event):
-            if self._waiting_response:
-                text = event.message.text or ""
-                # Ignora mensagens de 1 char (indicadores visuais como ▼)
-                if len(text) > 1:
-                    await self._response_queue.put(text)
-                    logger.debug(f"Msg recebida ({len(text)} chars): {text[:50]}...")
+        async def on_message(event):
+            text = (event.message.text or "").strip()
+
+            # Ignora mensagens vazias ou indicadores visuais (▼, etc.)
+            if len(text) <= 1:
+                return
+
+            if self._estado == _Estado.IDLE:
+                # Fora de uma consulta — descarta qualquer mensagem atrasada
+                logger.debug(f"[IDLE] Mensagem descartada do bot externo: '{text[:50]}'")
+                return
+
+            logger.debug(f"[{self._estado.value}] Mensagem recebida ({len(text)} chars): '{text[:60]}'")
+            await self._queue.put(text)
 
     # ─────────────────────────────────────────────────────────
-    # API pública de consultas (inalterada)
+    # API pública
     # ─────────────────────────────────────────────────────────
     async def query_poste(self, codigo: str, timeout: float = None) -> Optional[str]:
-        """Consulta um POSTE no bot de terceiro (fluxo conversacional)."""
-        return await self._send_conversational_query("/PTE", codigo, timeout)
+        return await self._consultar("/PTE", codigo, timeout)
 
     async def query_equipamento(self, codigo: str, timeout: float = None) -> Optional[str]:
-        """Consulta um EQUIPAMENTO no bot de terceiro (fluxo conversacional)."""
-        return await self._send_conversational_query("/EQP", codigo, timeout)
+        return await self._consultar("/EQP", codigo, timeout)
 
-    async def query_reincidencias(
-        self, codigo: str, timeout: float = None, tipo: str = "poste"
-    ) -> Optional[str]:
-        """Consulta genérica (compatibilidade)."""
+    async def query_reincidencias(self, codigo: str, timeout: float = None, tipo: str = "poste") -> Optional[str]:
         if tipo == "equipamento":
             return await self.query_equipamento(codigo, timeout)
         return await self.query_poste(codigo, timeout)
 
-    # Prompts exatos que o bot externo envia para cada comando
-    _PROMPTS_ESPERADOS = {
-        "/PTE": "informe o número do poste",
-        "/EQP": "informe o número do componente",
-    }
-
-    async def _send_conversational_query(
-        self, comando: str, codigo: str, timeout: float = None
-    ) -> Optional[str]:
+    # ─────────────────────────────────────────────────────────
+    # Fluxo conversacional
+    # ─────────────────────────────────────────────────────────
+    async def _consultar(self, comando: str, codigo: str, timeout: float = None) -> Optional[str]:
         """
-        Envia consulta em fluxo conversacional:
-        1. Envia comando (ex: /PTE)
-        2. Aguarda e VALIDA o prompt do bot antes de enviar o código
-        3. Envia código apenas quando o bot está esperando
-        4. Aguarda resposta final
+        Executa a consulta em 2 interações com o bot externo.
+
+        INTERAÇÃO 1 — Comando → Prompt:
+            Enviamos:  /PTE  ou  /EQP
+            Esperamos: "Informe o número do poste:"
+                    ou "Informe o número do componente:"
+            Validamos: texto do prompt antes de avançar
+
+        INTERAÇÃO 2 — Código → Dados:
+            Enviamos:  o código (ex: 1005792)
+            Esperamos: dados completos da instalação/poste
+                    ou mensagem de erro ("não cadastrado")
         """
         if not self._connected:
             logger.error("Userbot não conectado")
             return None
 
         timeout = timeout or float(settings.bot_terceiro_timeout)
-        prompt_esperado = self._PROMPTS_ESPERADOS.get(comando, "")
+        prompt_esperado = _PROMPTS.get(comando, "")
 
-        # Aguarda mensagens atrasadas e descarta tudo antes de começar
+        # ── Garante estado limpo antes de começar ──────────────────────────
+        # Aguarda mensagens residuais em trânsito e as descarta
         await asyncio.sleep(0.8)
-        while not self._response_queue.empty():
-            dropped = self._response_queue.get_nowait()
-            logger.debug(f"Fila limpa — descartado: {str(dropped)[:40]}")
+        descartadas = 0
+        while not self._queue.empty():
+            self._queue.get_nowait()
+            descartadas += 1
+        if descartadas:
+            logger.debug(f"Fila limpa: {descartadas} mensagem(ns) residual(is) descartada(s)")
 
         try:
-            self._waiting_response = True
+            # ── INTERAÇÃO 1: Comando → Prompt ──────────────────────────────
+            self._estado = _Estado.AGUARDA_PROMPT
+            logger.info(f"[AGUARDA_PROMPT] Enviando: {comando} (código: {codigo})")
 
-            # ETAPA 1: Envia o comando
             await self._client.send_message(settings.bot_terceiro_username, comando)
-            logger.debug(f"Enviado comando: {comando}")
 
-            # ETAPA 2: Aguarda e VALIDA o prompt
-            # Descarta mensagens que não sejam o prompt esperado (residuais)
-            prompt_recebido = False
+            # Aguarda o prompt correto — descarta qualquer outra mensagem
             deadline = asyncio.get_event_loop().time() + timeout
             while True:
                 remaining = deadline - asyncio.get_event_loop().time()
                 if remaining <= 0:
-                    logger.warning(f"Timeout aguardando prompt de '{comando}'")
+                    logger.warning(f"[AGUARDA_PROMPT] Timeout — bot externo não enviou prompt para {comando}")
                     return None
+
                 try:
-                    msg = await asyncio.wait_for(
-                        self._response_queue.get(), timeout=remaining
-                    )
+                    msg = await asyncio.wait_for(self._queue.get(), timeout=remaining)
                 except asyncio.TimeoutError:
-                    logger.warning(f"Timeout aguardando prompt de '{comando}'")
+                    logger.warning(f"[AGUARDA_PROMPT] Timeout — sem resposta do bot externo")
                     return None
 
                 if prompt_esperado and prompt_esperado in msg.lower():
-                    logger.debug(f"Prompt validado: '{msg.strip()}'")
-                    prompt_recebido = True
+                    logger.info(f"[AGUARDA_PROMPT] Prompt validado: '{msg.strip()}'")
                     break
                 else:
-                    # Mensagem inesperada — descarta e aguarda o prompt correto
-                    logger.warning(
-                        f"Mensagem inesperada descartada (aguardando prompt): "
-                        f"'{msg[:60]}'"
-                    )
+                    # Mensagem inesperada — pode ser resíduo de consulta anterior
+                    logger.warning(f"[AGUARDA_PROMPT] Mensagem inesperada descartada: '{msg[:60]}'")
 
-            if not prompt_recebido:
-                return None
+            # ── INTERAÇÃO 2: Código → Dados ────────────────────────────────
+            self._estado = _Estado.AGUARDA_RESPOSTA
+            logger.info(f"[AGUARDA_RESPOSTA] Enviando código: {codigo}")
 
-            # ETAPA 3: Prompt confirmado — agora é seguro enviar o código
             await self._client.send_message(settings.bot_terceiro_username, codigo)
-            logger.debug(f"Código enviado após prompt validado: {codigo}")
 
-            # ETAPA 3: Coleta resposta final (pode ser múltiplas mensagens)
-            messages: List[str] = []
-            wait_time = 2.5  # Tempo para aguardar mais mensagens
-
-            # Aguarda primeira resposta
+            # Aguarda a resposta principal
             try:
-                first = await asyncio.wait_for(self._response_queue.get(), timeout=timeout)
-                messages.append(first)
-                logger.debug(f"Primeira resposta: {len(first)} chars")
+                resposta = await asyncio.wait_for(self._queue.get(), timeout=timeout)
+                logger.info(f"[AGUARDA_RESPOSTA] Resposta recebida: {len(resposta)} chars")
             except asyncio.TimeoutError:
-                logger.warning(f"Timeout esperando resposta para código: {codigo}")
+                logger.warning(f"[AGUARDA_RESPOSTA] Timeout — bot externo não respondeu para {codigo}")
                 return None
 
-            # Continua coletando mensagens adicionais
+            # Coleta mensagens adicionais (caso o bot envie em partes)
+            partes = [resposta]
             while True:
                 try:
-                    msg = await asyncio.wait_for(self._response_queue.get(), timeout=wait_time)
-                    messages.append(msg)
-                    logger.debug(f"Msg adicional: {len(msg)} chars")
+                    extra = await asyncio.wait_for(self._queue.get(), timeout=2.5)
+                    partes.append(extra)
+                    logger.debug(f"[AGUARDA_RESPOSTA] Mensagem adicional: {len(extra)} chars")
                 except asyncio.TimeoutError:
                     break
 
-            # Junta todas as mensagens
-            full_response = "\n".join(messages)
-            logger.info(f"Resposta completa: {len(messages)} msgs, {len(full_response)} chars")
-            return full_response
+            resultado = "\n".join(partes)
+            logger.info(f"Consulta concluída: {len(partes)} parte(s), {len(resultado)} chars total")
+            return resultado
 
         except Exception as e:
-            logger.error(f"Erro na consulta: {e}")
+            logger.error(f"Erro inesperado na consulta {comando} {codigo}: {e}")
             return None
+
         finally:
-            self._waiting_response = False
+            # Sempre volta ao IDLE — mensagens fora de hora são descartadas
+            self._estado = _Estado.IDLE
+            logger.debug(f"Estado → IDLE (após {comando} {codigo})")
 
-    async def _send_query(self, mensagem: str, timeout: float = None) -> Optional[str]:
-        """Envia mensagem simples (para comandos como /Menu)."""
-        if not self._connected:
-            logger.error("Userbot não conectado")
-            return None
-
-        timeout = timeout or float(settings.bot_terceiro_timeout)
-
-        while not self._response_queue.empty():
-            self._response_queue.get_nowait()
-
-        try:
-            self._waiting_response = True
-
-            await self._client.send_message(settings.bot_terceiro_username, mensagem)
-            logger.debug(f"Enviado: {mensagem}")
-
-            messages: List[str] = []
-            wait_time = 2.0
-
-            try:
-                first = await asyncio.wait_for(self._response_queue.get(), timeout=timeout)
-                messages.append(first)
-            except asyncio.TimeoutError:
-                return None
-
-            while True:
-                try:
-                    msg = await asyncio.wait_for(self._response_queue.get(), timeout=wait_time)
-                    messages.append(msg)
-                except asyncio.TimeoutError:
-                    break
-
-            return "\n".join(messages)
-
-        except Exception as e:
-            logger.error(f"Erro: {e}")
-            return None
-        finally:
-            self._waiting_response = False
-
+    # ─────────────────────────────────────────────────────────
+    # Encerramento
+    # ─────────────────────────────────────────────────────────
     async def stop(self) -> None:
-        """Encerra conexão (salva sessão antes)."""
         if self._client:
-            # Salva sessão atualizada (peer cache, etc) antes de desconectar
             await self._save_session_string()
             await self._client.disconnect()
             self._connected = False
