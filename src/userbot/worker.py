@@ -24,7 +24,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Padrões que indicam que o código não existe no sistema externo
+# Padrões que indicam resposta inválida do bot externo
 _NAO_CADASTRADO_PATTERNS = (
     "não cadastrado",
     "nao cadastrado",
@@ -34,6 +34,9 @@ _NAO_CADASTRADO_PATTERNS = (
     "codigo invalido",
     "não existe",
     "nao existe",
+    "comando não reconhecido",
+    "comando nao reconhecido",
+    "favor refazer o processo",
 )
 
 
