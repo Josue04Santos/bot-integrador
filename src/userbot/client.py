@@ -171,9 +171,13 @@ class UserbotClient:
 
         timeout = timeout or float(settings.bot_terceiro_timeout)
 
-        # Limpa fila
+        # Aguarda mensagens atrasadas chegarem antes de limpar a fila.
+        # Necessário quando o item anterior foi servido do cache (muito rápido)
+        # e mensagens residuais da conversa anterior ainda estão em trânsito.
+        await asyncio.sleep(0.8)
         while not self._response_queue.empty():
-            self._response_queue.get_nowait()
+            dropped = self._response_queue.get_nowait()
+            logger.debug(f"Fila limpa — descartado: {str(dropped)[:40]}")
 
         try:
             self._waiting_response = True
