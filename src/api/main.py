@@ -7,6 +7,8 @@ import structlog
 from src.config import settings
 from src.userbot import userbot
 from src.services.parser import ResponseParser
+from src.api.routes.historico import router as historico_router
+from src.api.routes.conversa import router as conversa_router
 
 logger = structlog.get_logger()
 
@@ -16,6 +18,8 @@ app = FastAPI(
     description="API para consulta de postes e equipamentos via Telegram",
     version="1.0.0"
 )
+app.include_router(historico_router)
+app.include_router(conversa_router)
 
 # Parser
 parser = ResponseParser()
@@ -47,18 +51,6 @@ async def verify_api_key(x_api_key: str = Header(...)):
         raise HTTPException(status_code=401, detail="API Key inválida")
     return x_api_key
 
-
-# Lifecycle
-@app.on_event("startup")
-async def startup():
-    logger.info("Iniciando API...")
-    await userbot.start()
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    logger.info("Encerrando API...")
-    await userbot.stop()
 
 
 # Endpoints

@@ -549,6 +549,6 @@ Projeto proprietário — uso interno DPL Construções. Distribuição, cópia 
 Desenvolvimento: Josué Santos
 Assistência arquitetural: ARIA-BUILDER (metodologia µ-tasks)
 Cliente: DPL Construções — Terceirizada
-⚡ Bot Integrador DPL · Construído com ❤️ e ☕ em Imperatriz/MA
+⚡ Bot Integrador DPL · Construído por Josué Santos em Imperatriz/MA
 
 🔝 Voltar ao topo

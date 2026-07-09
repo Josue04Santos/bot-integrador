@@ -75,8 +75,8 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
         cached = await cache_service.lookup(session, item.code, item.query_type)
 
     if cached is not None:
-        # Resposta em cache pode ser "não cadastrado" — trata como falha
-        if _is_not_found(cached.raw_response or ""):
+        # Dupla verificação: dado inválido no cache (legado ou contaminação)
+        if not cache_service.is_valid_response(cached.raw_response or "") or _is_not_found(cached.raw_response or ""):
             async with db.session() as session:
                 query = await session.get(NetworkQuery, item.query_id)
                 if query:

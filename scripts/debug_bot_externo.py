@@ -25,16 +25,10 @@ from src.database.connection import db
 from src.utils.logger import setup_logging
 
 # ── Configure os códigos para teste ────────────────────────────────────────
-CODIGOS_POSTE = [
-    "3003841",
-]
+CODIGOS_POSTE = []
 
 CODIGOS_EQUIPAMENTO = [
-    "3003841",
-    "0075566",
-    "0065951",
     "0907855",
-    "2198002",
 ]
 
 # Delays (segundos) — ajuste para testar diferentes cenários
