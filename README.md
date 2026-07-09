@@ -61,6 +61,7 @@ Operadores de campo, despachantes e analistas da distribuidora de energia que pr
   - Código no cache mas desatualizado → entrega imediata + atualização em background
   - Código novo → consulta o bot externo, salva e entrega
 - ✅ Indicador visual no resultado: `📦 cache (2h atrás)` ou `📦 cache desatualizado (8d atrás) — atualizando…`
+- ✅ **Auto-refresh diário em background**: códigos vencidos e ainda em uso real (acessados nos últimos 60 dias) são reconsultados automaticamente de madrugada, distribuídos por dia da semana para não sobrecarregar o bot externo
 
 ### 🔍 Consultas em Lote
 
@@ -75,6 +76,8 @@ Operadores de campo, despachantes e analistas da distribuidora de energia que pr
 - ✅ Cliente Telethon que se loga como usuário real para consultar `@ReincidenciasBot`
 - ✅ Detecção automática de **timeout**, **erro** e **resposta vazia**
 - ✅ Parser robusto que extrai coordenadas, alimentador, estruturas e cabos
+- ✅ **Health-check de conexão**: detecta queda da sessão Telegram, tenta reconectar automaticamente e alerta o admin no PV caso a queda persista
+- ✅ Consultas serializadas (lock) — worker em tempo real e auto-refresh de madrugada nunca conversam com o bot externo ao mesmo tempo
 
 ### 📍 Exportação Geográfica
 
@@ -271,6 +274,13 @@ TELEGRAM_PHONE=+5599999999999           # com DDI
 BOT_TERCEIRO_USERNAME=ReincidenciasBot  # bot consultado
 BOT_TERCEIRO_TIMEOUT=30                 # segundos
 TELEGRAM_SOURCE_CHAT_ID=0               # opcional
+
+# ────────────────────────────────────────────────────────
+# 🔄 AUTO-REFRESH DE CACHE
+# ────────────────────────────────────────────────────────
+CACHE_AUTO_REFRESH_ENABLED=true
+CACHE_AUTO_REFRESH_HOUR=4               # hora do dia (0-23) do job diário
+CACHE_AUTO_REFRESH_ACTIVITY_DAYS=60     # só reprocessa códigos acessados nessa janela
 
 # ────────────────────────────────────────────────────────
 # 🗄️ BANCO DE DADOS

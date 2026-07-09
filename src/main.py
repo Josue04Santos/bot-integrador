@@ -6,9 +6,13 @@ Orquestra: Bot DPL (aiogram) + UserBot (Telethon) + Worker (consumer da fila).
 import asyncio
 import sys
 
+import uvicorn
+
 from src.bot import create_bot, create_dispatcher, on_shutdown, on_startup
 from src.database.connection import db
+from src.services import cache_service
 from src.userbot import userbot
+from src.userbot.scheduler import cache_refresh_loop
 from src.userbot.worker import worker_loop
 from src.utils.logger import get_logger, setup_logging
 
@@ -24,6 +28,8 @@ async def main() -> None:
 
     # 1) Banco
     await db.initialize()
+    async with db.session() as session:
+        await cache_service.ensure_schema(session)
 
     # 2) Bot DPL
     bot = create_bot()
@@ -32,18 +38,27 @@ async def main() -> None:
     dp.shutdown.register(on_shutdown)
 
     # 3) UserBot Telethon
-    ub_ok = await userbot.start()
+    ub_ok = await userbot.start(alert_bot=bot)
     if not ub_ok:
         logger.warning("UserBot NÃO conectou — consultas ficarão indisponíveis")
     else:
         logger.info("UserBot conectado com sucesso")
 
-    # 4) Roda Bot DPL + Worker em paralelo
+    # 4) Roda Bot DPL + Worker + Dashboard web em paralelo
+    web = uvicorn.Server(uvicorn.Config(
+        "src.api.main:app",
+        host="0.0.0.0",
+        port=8080,
+        log_level="warning",
+    ))
+
     try:
-        logger.info("Iniciando polling do Bot + Worker do UserBot...")
+        logger.info("Iniciando Bot + Worker + Dashboard (porta 8080)...")
         await asyncio.gather(
             dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types()),
             worker_loop(bot),
+            cache_refresh_loop(),
+            web.serve(),
         )
     except Exception as e:
         logger.critical(

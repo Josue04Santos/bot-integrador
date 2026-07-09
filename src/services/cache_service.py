@@ -9,6 +9,7 @@ Regras:
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,20 +18,79 @@ from src.database.models import CodeCache
 
 CACHE_TTL_DAYS = 7
 
+_DDL_ADD_LAST_ACCESSED_AT = sa.text(
+    "ALTER TABLE code_cache "
+    "ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+)
+
+
+async def ensure_schema(session: AsyncSession) -> None:
+    """Migração idempotente — garante colunas novas em bancos já existentes."""
+    await session.execute(_DDL_ADD_LAST_ACCESSED_AT)
+    await session.commit()
+
+# Marcadores que confirmam que a resposta é um dado real de poste/equipamento
+_MARCADORES_VALIDOS = (
+    "poste:",
+    "instalação:",
+    "instalacao:",
+    "alimentador",
+    "localização",
+    "localizacao",
+)
+
+# Qualquer um desses invalida a resposta — não salva no cache
+_MARCADORES_INVALIDOS = (
+    "informe o número",
+    "informe o numero",
+    "comando não reconhecido",
+    "comando nao reconhecido",
+    "não cadastrado",
+    "nao cadastrado",
+    "não encontrado",
+    "nao encontrado",
+    "favor refazer",
+    "código inválido",
+    "codigo invalido",
+)
+
+
+def is_valid_response(raw_response: str) -> bool:
+    """
+    Retorna True apenas se a resposta contém dados reais de poste/equipamento.
+    Impede que prompts, erros ou respostas misturadas entrem no cache.
+    """
+    if not raw_response or len(raw_response) < 50:
+        return False
+    lower = raw_response.lower()
+    if any(inv in lower for inv in _MARCADORES_INVALIDOS):
+        return False
+    if not any(val in lower for val in _MARCADORES_VALIDOS):
+        return False
+    return True
+
 
 async def lookup(
     session: AsyncSession,
     code: str,
     query_type: str,
 ) -> Optional[CodeCache]:
-    """Retorna o registro de cache para esse código, ou None se não existir."""
+    """
+    Retorna o registro de cache para esse código, ou None se não existir.
+    Atualiza last_accessed_at — usado pelo auto-refresh para saber quais
+    códigos ainda estão em uso real (ver src/userbot/scheduler.py).
+    """
     stmt = (
         select(CodeCache)
         .where(CodeCache.code == code)
         .where(CodeCache.query_type == query_type)
     )
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    entry = result.scalar_one_or_none()
+    if entry:
+        entry.last_accessed_at = datetime.now(timezone.utc)
+        await session.flush()
+    return entry
 
 
 async def upsert(
@@ -47,6 +107,13 @@ async def upsert(
     Insere ou atualiza o cache para esse código.
     Nunca cria linhas duplicadas — upsert por (code, query_type).
     """
+    if not is_valid_response(raw_response):
+        from src.utils.logger import get_logger
+        get_logger(__name__).warning(
+            f"Cache REJEITADO — resposta inválida para {code}: {repr(raw_response[:80])}"
+        )
+        return None
+
     now = datetime.now(timezone.utc)
 
     # Tenta atualizar primeiro

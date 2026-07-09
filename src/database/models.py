@@ -296,6 +296,10 @@ class CodeCache(Base):
     fetch_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     first_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     last_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    # Última vez que alguém realmente pediu esse código (mesmo em cache-hit).
+    # Distinto de last_fetched_at, que só muda quando o bot externo é reconsultado.
+    # Usado para limitar o auto-refresh ao conjunto de códigos ainda em uso real.
+    last_accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("code", "query_type", name="uq_code_cache_code_type"),

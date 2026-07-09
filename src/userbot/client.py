@@ -22,7 +22,7 @@ Estado da conversa rastreado explicitamente:
 
 import asyncio
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -32,7 +32,13 @@ from src.config import settings
 from src.database.connection import db
 from src.utils.logger import get_logger
 
+if TYPE_CHECKING:
+    from aiogram import Bot
+
 logger = get_logger(__name__)
+
+# Intervalo do health-check de conexão e cooldown entre alertas repetidos
+_HEALTH_CHECK_INTERVAL = 20.0  # segundos
 
 
 # ─────────────────────────────────────────────────────────────
@@ -83,6 +89,13 @@ class UserbotClient:
         self._connected = False
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._estado = _Estado.IDLE
+        self._alert_bot: Optional["Bot"] = None
+        self._alert_sent = False
+        self._health_task: Optional[asyncio.Task] = None
+        # Serializa chamadas concorrentes a _consultar — o worker (tempo real)
+        # e o scheduler de auto-refresh (madrugada) compartilham a mesma conversa
+        # com o bot externo, que só suporta 1 interação por vez.
+        self._consulta_lock = asyncio.Lock()
 
     # ─────────────────────────────────────────────────────────
     # Persistência da sessão (Postgres)
@@ -117,7 +130,8 @@ class UserbotClient:
     # ─────────────────────────────────────────────────────────
     # Ciclo de vida
     # ─────────────────────────────────────────────────────────
-    async def start(self) -> bool:
+    async def start(self, alert_bot: Optional["Bot"] = None) -> bool:
+        self._alert_bot = alert_bot
         try:
             await self._ensure_table()
             session_str = await self._load_session_string()
@@ -132,10 +146,66 @@ class UserbotClient:
             logger.info(f"Userbot conectado como: {me.first_name} (@{me.username})")
             self._setup_handler()
             self._connected = True
+            self._health_task = asyncio.create_task(self._watch_connection())
             return True
         except Exception as e:
             logger.error(f"Erro ao conectar userbot: {e}")
             return False
+
+    async def _alert(self, text: str) -> None:
+        """Envia uma mensagem de alerta para os super admins configurados."""
+        if not self._alert_bot:
+            return
+        for admin_id in settings.super_admin_ids:
+            try:
+                await self._alert_bot.send_message(admin_id, text)
+            except Exception:
+                logger.exception(f"Falha ao enviar alerta de conexão para admin {admin_id}")
+
+    async def _alert_disconnected(self, contexto: str = "") -> None:
+        """Dispara o alerta de desconexão uma única vez por episódio (evita spam)."""
+        if self._alert_sent:
+            return
+        self._alert_sent = True
+        sufixo = f" ({contexto})" if contexto else ""
+        await self._alert(
+            f"⚠️ <b>Userbot desconectado do Telegram{sufixo}</b>\n"
+            f"Consultas ao bot externo estão indisponíveis até a reconexão."
+        )
+
+    async def _watch_connection(self) -> None:
+        """
+        Loop de health-check: detecta queda de conexão, tenta reconectar
+        automaticamente e alerta os admins caso a queda persista.
+        """
+        while True:
+            await asyncio.sleep(_HEALTH_CHECK_INTERVAL)
+            if not self._client:
+                continue
+
+            if self._client.is_connected():
+                self._connected = True
+                if self._alert_sent:
+                    logger.info("Userbot reconectado ao Telegram")
+                    await self._alert("✅ Userbot reconectado ao Telegram.")
+                    self._alert_sent = False
+                continue
+
+            logger.warning("Health-check: userbot desconectado — tentando reconectar")
+            self._connected = False
+            try:
+                await self._client.connect()
+            except Exception as e:
+                logger.error(f"Falha ao tentar reconectar userbot: {e}")
+
+            if self._client.is_connected():
+                self._connected = True
+                logger.info("Reconexão automática bem-sucedida")
+                if self._alert_sent:
+                    await self._alert("✅ Userbot reconectado ao Telegram.")
+                    self._alert_sent = False
+            else:
+                await self._alert_disconnected("reconexão automática falhou")
 
     def _setup_handler(self) -> None:
         """
@@ -157,11 +227,10 @@ class UserbotClient:
                 return
 
             if self._estado == _Estado.IDLE:
-                # Fora de uma consulta — descarta qualquer mensagem atrasada
-                logger.debug(f"[IDLE] Mensagem descartada do bot externo: '{text[:50]}'")
+                logger.warning(f"[IDLE] Mensagem chegou fora de consulta — DESCARTADA: '{text[:80]}'")
                 return
 
-            logger.debug(f"[{self._estado.value}] Mensagem recebida ({len(text)} chars): '{text[:60]}'")
+            logger.info(f"[{self._estado.value}] Mensagem enfileirada ({len(text)} chars)")
             await self._queue.put(text)
 
     # ─────────────────────────────────────────────────────────
@@ -195,7 +264,14 @@ class UserbotClient:
             Enviamos:  o código (ex: 1005792)
             Esperamos: dados completos da instalação/poste
                     ou mensagem de erro ("não cadastrado")
+
+        Serializado por _consulta_lock: o worker (tempo real) e o scheduler
+        de auto-refresh nunca podem conversar com o bot externo ao mesmo tempo.
         """
+        async with self._consulta_lock:
+            return await self._consultar_sem_lock(comando, codigo, timeout)
+
+    async def _consultar_sem_lock(self, comando: str, codigo: str, timeout: float = None) -> Optional[str]:
         if not self._connected:
             logger.error("Userbot não conectado")
             return None
@@ -216,7 +292,7 @@ class UserbotClient:
         try:
             # ── INTERAÇÃO 1: Comando → Prompt ──────────────────────────────
             self._estado = _Estado.AGUARDA_PROMPT
-            logger.info(f"[AGUARDA_PROMPT] Enviando: {comando} (código: {codigo})")
+            logger.info(f">>> ENVIANDO COMANDO  : '{comando}'  (código a consultar: {codigo})")
 
             await self._client.send_message(settings.bot_terceiro_username, comando)
 
@@ -225,34 +301,35 @@ class UserbotClient:
             while True:
                 remaining = deadline - asyncio.get_event_loop().time()
                 if remaining <= 0:
-                    logger.warning(f"[AGUARDA_PROMPT] Timeout — bot externo não enviou prompt para {comando}")
+                    logger.warning(f"!!! TIMEOUT AGUARDANDO PROMPT de '{comando}' — bot externo não respondeu")
                     return None
 
                 try:
                     msg = await asyncio.wait_for(self._queue.get(), timeout=remaining)
                 except asyncio.TimeoutError:
-                    logger.warning(f"[AGUARDA_PROMPT] Timeout — sem resposta do bot externo")
+                    logger.warning(f"!!! TIMEOUT AGUARDANDO PROMPT — sem resposta do bot externo")
                     return None
 
+                logger.info(f"<<< RECEBIDO (estado={self._estado.value}): '{msg.strip()}'")
+
                 if prompt_esperado and prompt_esperado in msg.lower():
-                    logger.info(f"[AGUARDA_PROMPT] Prompt validado: '{msg.strip()}'")
+                    logger.info(f"    ✔ Prompt correto reconhecido — avançando para envio do código")
                     break
                 else:
-                    # Mensagem inesperada — pode ser resíduo de consulta anterior
-                    logger.warning(f"[AGUARDA_PROMPT] Mensagem inesperada descartada: '{msg[:60]}'")
+                    logger.warning(f"    ✘ Mensagem inesperada — descartando e aguardando prompt correto")
 
             # ── INTERAÇÃO 2: Código → Dados ────────────────────────────────
             self._estado = _Estado.AGUARDA_RESPOSTA
-            logger.info(f"[AGUARDA_RESPOSTA] Enviando código: {codigo}")
+            logger.info(f">>> ENVIANDO CÓDIGO   : '{codigo}'")
 
             await self._client.send_message(settings.bot_terceiro_username, codigo)
 
             # Aguarda a resposta principal
             try:
                 resposta = await asyncio.wait_for(self._queue.get(), timeout=timeout)
-                logger.info(f"[AGUARDA_RESPOSTA] Resposta recebida: {len(resposta)} chars")
+                logger.info(f"<<< RECEBIDO (estado={self._estado.value}): '{resposta[:120].strip()}' ({'...' if len(resposta) > 120 else ''})")
             except asyncio.TimeoutError:
-                logger.warning(f"[AGUARDA_RESPOSTA] Timeout — bot externo não respondeu para {codigo}")
+                logger.warning(f"!!! TIMEOUT AGUARDANDO RESPOSTA para código '{codigo}'")
                 return None
 
             # Coleta mensagens adicionais (caso o bot envie em partes)
@@ -261,27 +338,32 @@ class UserbotClient:
                 try:
                     extra = await asyncio.wait_for(self._queue.get(), timeout=2.5)
                     partes.append(extra)
-                    logger.debug(f"[AGUARDA_RESPOSTA] Mensagem adicional: {len(extra)} chars")
+                    logger.info(f"<<< RECEBIDO (parte {len(partes)}): '{extra[:80].strip()}'")
                 except asyncio.TimeoutError:
                     break
 
             resultado = "\n".join(partes)
-            logger.info(f"Consulta concluída: {len(partes)} parte(s), {len(resultado)} chars total")
+            logger.info(f"    ✔ Consulta concluída: {len(partes)} parte(s), {len(resultado)} chars")
             return resultado
 
         except Exception as e:
             logger.error(f"Erro inesperado na consulta {comando} {codigo}: {e}")
+            if "disconnected" in str(e).lower():
+                self._connected = False
+                asyncio.create_task(self._alert_disconnected(f"falha ao enviar {comando} {codigo}"))
             return None
 
         finally:
-            # Sempre volta ao IDLE — mensagens fora de hora são descartadas
             self._estado = _Estado.IDLE
-            logger.debug(f"Estado → IDLE (após {comando} {codigo})")
+            logger.info(f"--- ESTADO → IDLE  (fim de {comando} {codigo}) ---")
 
     # ─────────────────────────────────────────────────────────
     # Encerramento
     # ─────────────────────────────────────────────────────────
     async def stop(self) -> None:
+        if self._health_task:
+            self._health_task.cancel()
+            self._health_task = None
         if self._client:
             await self._save_session_string()
             await self._client.disconnect()

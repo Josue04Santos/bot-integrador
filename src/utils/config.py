@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     consulta_timeout: float = 30.0
     max_consultas_batch: int = 50
 
+    # --- Auto-refresh do cache ---
+    # Atualiza em background os códigos com cache vencido, distribuindo-os
+    # por dia da semana (hash estável do código) para não sobrecarregar o bot externo.
+    cache_auto_refresh_enabled: bool = True
+    cache_auto_refresh_hour: int = 4  # hora do dia (0-23) em que o job diário roda
+    # Só reprocessa códigos vencidos que foram realmente acessados dentro dessa
+    # janela — evita que o job cresça sem limite com códigos que ninguém mais consulta.
+    cache_auto_refresh_activity_days: int = 60
+
     # --- Administração ---
     super_admin_ids: Union[str, list[int]] = ""
 
