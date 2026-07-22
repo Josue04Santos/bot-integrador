@@ -14,7 +14,6 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from src.api.deps import verify_api_key
 from src.config import settings
@@ -26,16 +25,6 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/chi", tags=["chi"])
-
-
-class ComponenteOut(BaseModel):
-    tipo: str
-    componente_code: str
-    elo: str | None
-    clientes: int
-    trafos: int | None
-
-    model_config = {"from_attributes": True}
 
 
 class PosteOut(BaseModel):
@@ -52,11 +41,14 @@ class PosteOut(BaseModel):
 class EquipamentoOut(BaseModel):
     code: str
     tipo: str | None
-    alimentador: str | None
     poste_referencia: str | None
+    potencia: str | None
+    tensao_primaria: str | None
+    fase: str | None
     clientes_total: int | None
     situacao: str | None
-    componentes: list[ComponenteOut]
+    perimetro: str | None
+    alimentador: str | None
 
     model_config = {"from_attributes": True}
 
@@ -111,11 +103,7 @@ async def _consultar_poste(codigo: str) -> ChiResponse:
 
 async def _consultar_equipamento(codigo: str) -> ChiResponse:
     async with db.session() as session:
-        stmt = (
-            select(Equipamento)
-            .where(Equipamento.code == codigo)
-            .options(selectinload(Equipamento.componentes))
-        )
+        stmt = select(Equipamento).where(Equipamento.code == codigo)
         equipamento = (await session.execute(stmt)).scalar_one_or_none()
 
     if equipamento:
@@ -130,14 +118,6 @@ async def _consultar_equipamento(codigo: str) -> ChiResponse:
         equipamento = await persistencia_estruturada.salvar_equipamento(
             session, codigo, raw, origem_client="userbot_consulta_api"
         )
-        if equipamento:
-            # Recarrega com componentes para a resposta (evita lazy-load fora da sessão)
-            stmt = (
-                select(Equipamento)
-                .where(Equipamento.id == equipamento.id)
-                .options(selectinload(Equipamento.componentes))
-            )
-            equipamento = (await session.execute(stmt)).scalar_one()
 
     if not equipamento:
         raise HTTPException(status_code=404, detail="Código não cadastrado no sistema")
