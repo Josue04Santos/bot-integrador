@@ -266,14 +266,21 @@ TELEGRAM_WEBHOOK_URL=                   # ex: https://meudominio.com/webhook
 TELEGRAM_WEBHOOK_SECRET=                # token secreto opcional
 
 # ────────────────────────────────────────────────────────
-# 🛰️ USERBOT (Telethon)
+# 🛰️ USERBOT DO BOT DPL (Telethon)
 # ────────────────────────────────────────────────────────
-TELEGRAM_API_ID=1234567                 # de my.telegram.org
-TELEGRAM_API_HASH=abc123...             # de my.telegram.org
-TELEGRAM_PHONE=+5599999999999           # com DDI
+BOT_TELEGRAM_API_ID=1234567             # de my.telegram.org
+BOT_TELEGRAM_API_HASH=abc123...         # de my.telegram.org
+BOT_TELEGRAM_PHONE=+5599999999999       # com DDI
 BOT_TERCEIRO_USERNAME=ReincidenciasBot  # bot consultado
 BOT_TERCEIRO_TIMEOUT=30                 # segundos
 TELEGRAM_SOURCE_CHAT_ID=0               # opcional
+
+# ────────────────────────────────────────────────────────
+# 🛰️ USERBOT EXCLUSIVO PARA CONSULTAS VIA API/CHI (conta separada)
+# ────────────────────────────────────────────────────────
+CHI_TELEGRAM_API_ID=                    # de my.telegram.org (conta dedicada)
+CHI_TELEGRAM_API_HASH=
+CHI_TELEGRAM_PHONE=
 
 # ────────────────────────────────────────────────────────
 # 🔄 AUTO-REFRESH DE CACHE

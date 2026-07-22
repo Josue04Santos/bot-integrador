@@ -3,7 +3,7 @@ Cliente Telegram EXCLUSIVO para consultas vindas da API (ex: CHI/Naeg).
 
 Mesma sessão/protocolo de conversa do userbot do bot DPL
 (src/userbot/client.py), mas:
-  - conta/número Telegram SEPARADO (settings.consulta_api_telegram_*)
+  - conta/número Telegram SEPARADO (settings.chi_telegram_*)
   - linha própria em `telethon_sessions` (SESSION_ID distinto — não
     colide com "userbot")
   - lock próprio — serializa só as chamadas deste client; não precisa
@@ -12,7 +12,7 @@ Mesma sessão/protocolo de conversa do userbot do bot DPL
   - NÃO usa a fila (`src/dispatcher/queue.py`) — a API é request/response
     síncrono, o handler FastAPI chama query_poste/query_equipamento direto
 
-Se as credenciais (consulta_api_telegram_api_id/hash/phone) estiverem
+Se as credenciais (chi_telegram_api_id/hash/phone) estiverem
 vazias, `start()` não conecta e loga um aviso — a API funciona em modo
 cache-only até a conta real ser configurada.
 """
@@ -72,9 +72,9 @@ class UserbotConsultaApiClient:
     def is_configured(self) -> bool:
         """True se as credenciais da conta dedicada já foram fornecidas."""
         return bool(
-            settings.consulta_api_telegram_api_id
-            and settings.consulta_api_telegram_api_hash
-            and settings.consulta_api_telegram_phone
+            settings.chi_telegram_api_id
+            and settings.chi_telegram_api_hash
+            and settings.chi_telegram_phone
         )
 
     # ─────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ class UserbotConsultaApiClient:
         if not self.is_configured:
             logger.warning(
                 "Userbot de consulta API NÃO configurado "
-                "(CONSULTA_API_TELEGRAM_API_ID/HASH/PHONE vazios) — "
+                "(CHI_TELEGRAM_API_ID/HASH/PHONE vazios) — "
                 "endpoint CHI funcionará só em modo cache, sem fallback ao vivo."
             )
             return False
@@ -119,10 +119,10 @@ class UserbotConsultaApiClient:
             session_str = await self._load_session_string()
             self._client = TelegramClient(
                 StringSession(session_str),
-                settings.consulta_api_telegram_api_id,
-                settings.consulta_api_telegram_api_hash,
+                settings.chi_telegram_api_id,
+                settings.chi_telegram_api_hash,
             )
-            await self._client.start(phone=settings.consulta_api_telegram_phone)
+            await self._client.start(phone=settings.chi_telegram_phone)
             await self._save_session_string()
             me = await self._client.get_me()
             logger.info(f"Userbot de consulta API conectado como: {me.first_name} (@{me.username})")

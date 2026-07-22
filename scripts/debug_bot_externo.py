@@ -86,8 +86,8 @@ async def run_diagnostic():
 
     client = TelegramClient(
         StringSession(session_str),
-        settings.telegram_api_id,
-        settings.telegram_api_hash,
+        settings.bot_telegram_api_id,
+        settings.bot_telegram_api_hash,
     )
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -102,7 +102,7 @@ async def run_diagnostic():
             _log_recv(text)
             await queue.put(text)
 
-    await client.start(phone=settings.telegram_phone)
+    await client.start(phone=settings.bot_telegram_phone)
     me = await client.get_me()
     print(f"\n✅ Userbot conectado: {me.first_name}")
     print(f"🎯 Bot alvo: @{settings.bot_terceiro_username}")

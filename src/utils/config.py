@@ -24,17 +24,17 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str = ""
     webhook_enabled: bool = False
 
-    # --- Telegram Userbot (MTProto) ---
-    telegram_api_id: int
-    telegram_api_hash: str
-    telegram_phone: str
+    # --- Telegram Userbot do bot DPL (MTProto) ---
+    bot_telegram_api_id: int
+    bot_telegram_api_hash: str
+    bot_telegram_phone: str
 
-    # --- Telegram Userbot EXCLUSIVO para consultas via API (conta separada) ---
+    # --- Telegram Userbot EXCLUSIVO para consultas via API/CHI (conta separada) ---
     # Vazio até o usuário fornecer a conta real — enquanto vazio, a API
     # funciona só em modo cache (sem fallback ao vivo).
-    consulta_api_telegram_api_id: int = 0
-    consulta_api_telegram_api_hash: str = ""
-    consulta_api_telegram_phone: str = ""
+    chi_telegram_api_id: int = 0
+    chi_telegram_api_hash: str = ""
+    chi_telegram_phone: str = ""
 
     # --- Bot de terceiros (alvo das consultas) ---
     bot_terceiro_username: str = "ReincidenciasBot"
@@ -107,9 +107,9 @@ class Settings(BaseSettings):
         v.parent.mkdir(parents=True, exist_ok=True)
         return v
 
-    @field_validator("consulta_api_telegram_api_id", mode="before")
+    @field_validator("chi_telegram_api_id", mode="before")
     @classmethod
-    def parse_consulta_api_telegram_api_id(cls, v) -> int:
+    def parse_chi_telegram_api_id(cls, v) -> int:
         """Trata string vazia no .env como 'não configurado' (0), em vez de erro."""
         if v in (None, "", "0"):
             return 0

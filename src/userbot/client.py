@@ -137,10 +137,10 @@ class UserbotClient:
             session_str = await self._load_session_string()
             self._client = TelegramClient(
                 StringSession(session_str),
-                settings.telegram_api_id,
-                settings.telegram_api_hash,
+                settings.bot_telegram_api_id,
+                settings.bot_telegram_api_hash,
             )
-            await self._client.start(phone=settings.telegram_phone)
+            await self._client.start(phone=settings.bot_telegram_phone)
             await self._save_session_string()
             me = await self._client.get_me()
             logger.info(f"Userbot conectado como: {me.first_name} (@{me.username})")
