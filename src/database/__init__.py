@@ -8,6 +8,16 @@ from src.database.models import (
     Meter,
     KmlExport,
     AgentRun,
+    CodeCache,
+)
+from src.database.models_estruturados import (
+    Poste,
+    Equipamento,
+    Componente,
+)
+from src.database.models_legado import (
+    TelethonSession,
+    UsuarioLegado,
 )
 from src.database.types import uuid7, uuid7_timestamp
 
@@ -24,6 +34,14 @@ __all__ = [
     "Meter",
     "KmlExport",
     "AgentRun",
+    "CodeCache",
+    # Models estruturados
+    "Poste",
+    "Equipamento",
+    "Componente",
+    # Legado
+    "TelethonSession",
+    "UsuarioLegado",
     # Utils
     "uuid7",
     "uuid7_timestamp",

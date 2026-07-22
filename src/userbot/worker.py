@@ -18,7 +18,8 @@ from aiogram import Bot
 from src.database.connection import db
 from src.database.models import NetworkQuery, QueryBatch
 from src.dispatcher import query_queue, QueueItem
-from src.services import cache_service
+from src.parsing.deteccao import is_not_found as _is_not_found
+from src.services import cache_service, persistencia_estruturada
 from src.userbot import userbot
 from src.utils.logger import get_logger
 
@@ -39,28 +40,6 @@ async def _wait_for_bot_ready() -> None:
         wait = _MIN_INTERVAL_BETWEEN_REAL_QUERIES - elapsed
         logger.info(f"Cadência: aguardando {wait:.1f}s antes de chamar bot externo")
         await asyncio.sleep(wait)
-
-
-# Padrões que indicam resposta inválida do bot externo
-_NAO_CADASTRADO_PATTERNS = (
-    "não cadastrado",
-    "nao cadastrado",
-    "não encontrado",
-    "nao encontrado",
-    "código inválido",
-    "codigo invalido",
-    "não existe",
-    "nao existe",
-    "comando não reconhecido",
-    "comando nao reconhecido",
-    "favor refazer o processo",
-)
-
-
-def _is_not_found(response: str) -> bool:
-    """Retorna True se a resposta indica que o código não está cadastrado."""
-    lower = response.lower()
-    return any(p in lower for p in _NAO_CADASTRADO_PATTERNS)
 
 
 def _utcnow() -> datetime:
@@ -169,6 +148,15 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
                 longitude=query.longitude,
                 alimentador=query.alimentador,
             )
+
+            # Persiste dado estruturado (postes/equipamentos/componentes)
+            await persistencia_estruturada.salvar(
+                session,
+                code=item.code,
+                query_type=item.query_type,
+                raw=response,
+                origem_client="userbot",
+            )
         elif not_found:
             # Resposta veio, mas o código não existe no sistema externo
             query.status = "error"
@@ -210,6 +198,13 @@ async def _background_refresh(code: str, query_type: str) -> None:
                     code=code,
                     query_type=query_type,
                     raw_response=response,
+                )
+                await persistencia_estruturada.salvar(
+                    session,
+                    code=code,
+                    query_type=query_type,
+                    raw=response,
+                    origem_client="userbot",
                 )
             logger.info("Background refresh concluído", code=code)
         else:

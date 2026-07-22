@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     telegram_api_hash: str
     telegram_phone: str
 
+    # --- Telegram Userbot EXCLUSIVO para consultas via API (conta separada) ---
+    # Vazio até o usuário fornecer a conta real — enquanto vazio, a API
+    # funciona só em modo cache (sem fallback ao vivo).
+    consulta_api_telegram_api_id: int = 0
+    consulta_api_telegram_api_hash: str = ""
+    consulta_api_telegram_phone: str = ""
+
     # --- Bot de terceiros (alvo das consultas) ---
     bot_terceiro_username: str = "ReincidenciasBot"
     bot_terceiro_timeout: int = 30
@@ -99,6 +106,14 @@ class Settings(BaseSettings):
         """Garante que pasta do SQLite exista."""
         v.parent.mkdir(parents=True, exist_ok=True)
         return v
+
+    @field_validator("consulta_api_telegram_api_id", mode="before")
+    @classmethod
+    def parse_consulta_api_telegram_api_id(cls, v) -> int:
+        """Trata string vazia no .env como 'não configurado' (0), em vez de erro."""
+        if v in (None, "", "0"):
+            return 0
+        return int(v)
 
     @field_validator("super_admin_ids", mode="before")
     @classmethod

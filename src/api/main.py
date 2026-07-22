@@ -1,25 +1,42 @@
 """API FastAPI para o Bot Integrador."""
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Depends, Header
 from pydantic import BaseModel
 from typing import Optional
 import structlog
 
 from src.config import settings
+from src.database.connection import db
 from src.userbot import userbot
 from src.services.parser import ResponseParser
+from src.api.deps import verify_api_key
 from src.api.routes.historico import router as historico_router
 from src.api.routes.conversa import router as conversa_router
+from src.api.routes.chi import router as chi_router
+from src.userbot_consulta_api import userbot_consulta_api
 
 logger = structlog.get_logger()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await db.initialize()
+    await userbot_consulta_api.start()
+    yield
+    await userbot_consulta_api.stop()
+
 
 # App FastAPI
 app = FastAPI(
     title="Bot Integrador API",
     description="API para consulta de postes e equipamentos via Telegram",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 app.include_router(historico_router)
 app.include_router(conversa_router)
+app.include_router(chi_router)
 
 # Parser
 parser = ResponseParser()
@@ -43,13 +60,6 @@ class ConsultaResponse(BaseModel):
     dados_brutos: str
     coordenadas: Optional[Coordenadas] = None
     erro: Optional[str] = None
-
-
-# Auth
-async def verify_api_key(x_api_key: str = Header(...)):
-    if x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="API Key inválida")
-    return x_api_key
 
 
 
