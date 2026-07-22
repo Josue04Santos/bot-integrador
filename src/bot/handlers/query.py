@@ -219,24 +219,30 @@ async def _process_codes_input(
     # Limpa estado
     await state.clear()
 
-    # Resposta ao usuário
-    invalid_note = ""
+    # Mensagem única de progresso — será editada pelo worker conforme o
+    # lote processa, em vez de mandar 1 mensagem por resultado individual.
+    sent = await message.answer(
+        f"🎉 <b>Lote em execução:</b>\n\n"
+        f"🆔 Lote: <code>#{batch.id[:8]}</code>\n"
+        f"📊 Total: <b>{len(codes)}</b>\n"
+        f"✅ OK: <b>0</b>\n"
+        f"❌ Erros: <b>0</b>\n"
+        f"⏱️ Timeouts: <b>0</b>\n"
+        f"⏱️ Duração: <b>0.0s</b>\n"
+    )
+
+    async with db.session() as session:
+        b = await session.get(QueryBatch, batch.id)
+        if b:
+            b.progress_chat_id = message.chat.id
+            b.progress_message_id = sent.message_id
+
     if invalid:
         sample = ", ".join(invalid[:5])
         more = f" (+{len(invalid) - 5})" if len(invalid) > 5 else ""
-        invalid_note = f"\n⚠️ <i>{len(invalid)} código(s) inválido(s) ignorado(s): {sample}{more}</i>"
-
-    tipo_label = "🏗️ POSTE" if query_type == "poste" else "⚡ EQUIPAMENTO"
-    await message.answer(
-        f"⏳ <b>Lote enfileirado!</b>\n\n"
-        f"🆔 Código: <code>#{batch.id[:8]}</code>\n"
-        f"{tipo_label}\n"
-        f"📥 Fonte: {source_label}\n"
-        f"📊 Total: <b>{len(codes)}</b> consulta(s)\n"
-        f"📦 Fila: {query_queue.size()} no total"
-        f"{invalid_note}\n\n"
-        f"<i>Os resultados chegarão aqui conforme forem processados.</i>"
-    )
+        await message.answer(
+            f"⚠️ <i>{len(invalid)} código(s) inválido(s) ignorado(s): {sample}{more}</i>"
+        )
 
     logger.info(
         "Batch criado",
@@ -244,4 +250,5 @@ async def _process_codes_input(
         user_id=auth_user_id,
         total=len(codes),
         type=query_type,
+        source=source_label,
     )

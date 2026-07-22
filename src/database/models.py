@@ -102,6 +102,11 @@ class QueryBatch(Base):
     # Erro global (se houve)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Mensagem única de progresso no Telegram — editada conforme o lote
+    # processa, em vez de mandar 1 mensagem por resultado individual.
+    progress_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    progress_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+
     # Relacionamentos
     user: Mapped["AuthorizedUser"] = relationship(back_populates="batches")
     queries: Mapped[list["NetworkQuery"]] = relationship(back_populates="batch", cascade="all, delete-orphan")

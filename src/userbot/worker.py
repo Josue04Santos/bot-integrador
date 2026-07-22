@@ -63,10 +63,8 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
                     query.error_message = "não cadastrado"
                     query.raw_response = cached.raw_response
             await _update_batch(item.batch_id, error=True)
-            await _notify_user(bot, item, response=None,
-                               error="Código não cadastrado no sistema",
-                               cache_info=None)
-            await _check_batch_complete(bot, item.batch_id, item.chat_id)
+            await _update_progress_message(bot, item.batch_id)
+            await _check_batch_complete(bot, item.batch_id)
             return
 
         fresh = cache_service.is_fresh(cached)
@@ -89,14 +87,12 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
 
         if fresh:
             logger.info("Cache hit (fresco)", code=item.code, age=age)
-            cache_info = f"📦 cache ({age})"
         else:
             logger.info("Cache stale — refresh em background", code=item.code, age=age)
-            cache_info = f"📦 cache desatualizado ({age}) — atualizando…"
             asyncio.create_task(_background_refresh(item.code, item.query_type))
 
-        await _notify_user(bot, item, cached.raw_response, error=None, cache_info=cache_info)
-        await _check_batch_complete(bot, item.batch_id, item.chat_id)
+        await _update_progress_message(bot, item.batch_id)
+        await _check_batch_complete(bot, item.batch_id)
         return
 
     # ── Cache miss: consulta o bot externo ──────────────────────────────────
@@ -173,13 +169,8 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
         success=bool(response and not not_found),
         error=bool(error_msg or not_found),
     )
-    await _notify_user(
-        bot, item,
-        response=response if (response and not not_found) else None,
-        error=f"Código não cadastrado no sistema" if not_found else error_msg,
-        cache_info=None,
-    )
-    await _check_batch_complete(bot, item.batch_id, item.chat_id)
+    await _update_progress_message(bot, item.batch_id)
+    await _check_batch_complete(bot, item.batch_id)
 
 
 async def _background_refresh(code: str, query_type: str) -> None:
@@ -234,8 +225,8 @@ async def _update_batch(
         batch.status = "running"
 
 
-async def _check_batch_complete(bot: Bot, batch_id: str, chat_id: int) -> None:
-    """Verifica se o batch terminou e dispara notificação de conclusão."""
+async def _check_batch_complete(bot: Bot, batch_id: str) -> None:
+    """Verifica se o batch terminou e finaliza a mensagem de progresso."""
     batch_just_completed = False
     async with db.session() as session:
         batch = await session.get(QueryBatch, batch_id)
@@ -248,85 +239,90 @@ async def _check_batch_complete(bot: Bot, batch_id: str, chat_id: int) -> None:
             batch_just_completed = True
 
     if batch_just_completed:
-        await _notify_batch_complete(bot, batch_id, chat_id)
+        await _update_progress_message(bot, batch_id, force=True)
+        logger.info("Batch finalizado", batch_id=batch_id[:8])
 
 
-async def _notify_batch_complete(bot: Bot, batch_id: str, chat_id: int) -> None:
-    """Envia resumo de conclusão do lote + botão de download."""
-    from src.bot.keyboards.export import kml_download_kb
+# Throttle de edições — evita rate limit do Telegram quando muitos cache-hits
+# processam quase instantaneamente. A edição final (conclusão) sempre força.
+_last_progress_edit: dict[str, float] = {}
+_MIN_INTERVAL_BETWEEN_EDITS = 2.0  # segundos
 
-    async with db.session() as session:
-        batch = await session.get(QueryBatch, batch_id)
-        if not batch:
-            return
-        total = batch.total_codes
-        ok = batch.success_count
-        err = batch.failure_count
-        timeout = batch.timeout_count
-        duration_str = ""
-        if batch.started_at and batch.finished_at:
-            delta = (batch.finished_at - batch.started_at).total_seconds()
-            duration_str = (
-                f"⏱ Duração: <b>{delta:.1f}s</b>\n"
-                if delta < 60
-                else f"⏱ Duração: <b>{delta / 60:.1f}min</b>\n"
-            )
 
-    if ok == total:
-        icon, status_text = "🎉", "Lote concluído com sucesso!"
-    elif ok > 0:
-        icon, status_text = "✅", "Lote concluído (com falhas)"
+def _format_duration(batch: QueryBatch) -> str:
+    inicio = batch.started_at or batch.created_at
+    fim = batch.finished_at or _utcnow()
+    delta = (fim - inicio).total_seconds()
+    return f"{delta:.1f}s" if delta < 60 else f"{delta / 60:.1f}min"
+
+
+def _format_progress_text(batch: QueryBatch) -> tuple[str, bool]:
+    """Retorna (texto, tem_sucesso) — tem_sucesso decide se anexa o botão de download."""
+    if batch.status == "completed":
+        ok, total = batch.success_count, batch.total_codes
+        if ok == total:
+            icon, status_text = "🎉", "Lote concluído com sucesso!"
+        elif ok > 0:
+            icon, status_text = "✅", "Lote concluído (com falhas)"
+        else:
+            icon, status_text = "⚠️", "Lote concluído sem sucesso"
+        rodape = (
+            "\n<i>Clique abaixo para baixar KML (Google Earth) + CSV.</i>" if ok > 0
+            else "\n<i>Nenhum resultado disponível para exportar.</i>"
+        )
+        tem_sucesso = ok > 0
     else:
-        icon, status_text = "⚠️", "Lote concluído sem sucesso"
-
-    tem_sucesso = ok > 0
+        icon, status_text = "🎉", "Lote em execução:"
+        rodape = ""
+        tem_sucesso = False
 
     text = (
         f"{icon} <b>{status_text}</b>\n\n"
-        f"🆔 Lote: <code>#{batch_id[:8]}</code>\n"
-        f"📊 Total: <b>{total}</b>\n"
-        f"✅ OK: <b>{ok}</b>\n"
-        f"❌ Erros: <b>{err}</b>\n"
-        f"⏱ Timeouts: <b>{timeout}</b>\n"
-        f"{duration_str}"
-        + (f"\n<i>Clique abaixo para baixar KML (Google Earth) + CSV.</i>" if tem_sucesso else
-           f"\n<i>Nenhum resultado disponível para exportar.</i>")
+        f"🆔 Lote: <code>#{batch.id[:8]}</code>\n"
+        f"📊 Total: <b>{batch.total_codes}</b>\n"
+        f"✅ OK: <b>{batch.success_count}</b>\n"
+        f"❌ Erros: <b>{batch.failure_count}</b>\n"
+        f"⏱️ Timeouts: <b>{batch.timeout_count}</b>\n"
+        f"⏱️ Duração: <b>{_format_duration(batch)}</b>\n"
+        f"{rodape}"
     )
+    return text, tem_sucesso
+
+
+async def _update_progress_message(bot: Bot, batch_id: str, force: bool = False) -> None:
+    """
+    Edita a mensagem única de progresso do lote — em vez de mandar 1 mensagem
+    por resultado individual. `force=True` ignora o throttle (usado na
+    conclusão, pra garantir que os números finais sempre apareçam).
+    """
+    if not force:
+        last = _last_progress_edit.get(batch_id, 0.0)
+        if time.monotonic() - last < _MIN_INTERVAL_BETWEEN_EDITS:
+            return
+
+    async with db.session() as session:
+        batch = await session.get(QueryBatch, batch_id)
+        if not batch or not batch.progress_chat_id or not batch.progress_message_id:
+            return
+        text, tem_sucesso = _format_progress_text(batch)
+        chat_id = batch.progress_chat_id
+        message_id = batch.progress_message_id
+
+    from src.bot.keyboards.export import kml_download_kb
 
     try:
-        await bot.send_message(
-            chat_id, text,
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
             reply_markup=kml_download_kb(batch_id) if tem_sucesso else None,
         )
-        logger.info("Batch finalizado", batch_id=batch_id[:8], ok=ok, total=total)
-    except Exception:
-        logger.exception("Falha ao notificar conclusão do batch", batch_id=batch_id[:8])
-
-
-async def _notify_user(
-    bot: Bot,
-    item: QueueItem,
-    response: str | None,
-    error: str | None,
-    cache_info: str | None,
-) -> None:
-    """Envia o resultado individual ao usuário."""
-    tipo_label = "🏗️ POSTE" if item.query_type == "poste" else "⚡ EQUIPAMENTO"
-    header = f"{tipo_label} • <code>{item.code}</code>"
-    cache_line = f"\n<i>{cache_info}</i>" if cache_info else ""
-
-    if response:
-        body = response if len(response) < 3800 else response[:3800] + "\n\n[...truncado]"
-        text = f"✅ <b>Resultado</b>{cache_line}\n{header}\n\n<pre>{body}</pre>"
-    elif error:
-        text = f"❌ <b>Erro</b>\n{header}\n\n<code>{error}</code>"
-    else:
-        text = f"⏱ <b>Timeout</b>\n{header}\n\nSem resposta do bot remoto."
-
-    try:
-        await bot.send_message(item.chat_id, text)
-    except Exception:
-        logger.exception("Falha ao notificar user", chat_id=item.chat_id)
+        _last_progress_edit[batch_id] = time.monotonic()
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            _last_progress_edit[batch_id] = time.monotonic()
+            return
+        logger.exception("Falha ao editar mensagem de progresso", batch_id=batch_id[:8])
 
 
 async def worker_loop(bot: Bot) -> None:
