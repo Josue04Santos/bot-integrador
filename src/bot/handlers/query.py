@@ -38,6 +38,14 @@ _SEP_RE = re.compile(r"[,;\s]+")
 _CODE_RE = re.compile(r"^[A-Za-z0-9\-_]{3,20}$")
 
 
+async def _remove_buttons(message: Message) -> None:
+    """Remove o teclado inline da mensagem após o botão ser clicado."""
+    try:
+        await message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass  # mensagem antiga demais pra editar, ou já sem teclado — sem problema
+
+
 # ============================================================================
 # 1) Callbacks dos botões POSTE / EQUIPAMENTO
 # ============================================================================
@@ -46,6 +54,7 @@ _CODE_RE = re.compile(r"^[A-Za-z0-9\-_]{3,20}$")
 async def on_choose_poste(cb: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(QueryStates.waiting_code)
     await state.update_data(query_type="poste")
+    await _remove_buttons(cb.message)
     await cb.message.answer(
         "🏗️ <b>Consulta de POSTE</b>\n\n"
         "Envie o(s) código(s):\n"
@@ -62,6 +71,7 @@ async def on_choose_poste(cb: CallbackQuery, state: FSMContext) -> None:
 async def on_choose_equipamento(cb: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(QueryStates.waiting_code)
     await state.update_data(query_type="instalacao")
+    await _remove_buttons(cb.message)
     await cb.message.answer(
         "⚡ <b>Consulta de EQUIPAMENTO/INSTALAÇÃO</b>\n\n"
         "Envie o(s) código(s):\n"
@@ -77,6 +87,7 @@ async def on_choose_equipamento(cb: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == CB_CANCEL)
 async def on_cancel(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
+    await _remove_buttons(cb.message)
     await cb.message.answer("❌ Operação cancelada. Use /start para começar de novo.")
     await cb.answer("Cancelado")
 
