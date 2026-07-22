@@ -1,0 +1,39 @@
+[Unit]
+Description=Bot Integrador - Sistema de Integração Telegram
+After=network.target
+
+[Service]
+Type=simple
+
+# 🔐 USUÁRIO CORRETO (NÃO ROOT)
+User=ti
+Group=ti
+
+# 📂 PASTA DO PROJETO
+WorkingDirectory=/home/ti/project/bot_integrador
+
+# 🐍 PYTHON DO VENV (OBRIGATÓRIO)
+ExecStart=/home/ti/project/bot_integrador/venv/bin/python -m src.main
+
+# 🌱 VARIÁVEIS DE AMBIENTE
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/home/ti/project/bot_integrador/.env
+
+# 🔄 CONTROLE DE RESTART (ANTI-LOOP)
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+TimeoutStopSec=10
+
+# 📜 LOGS
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bot-integrador
+
+# 🛡️ SEGURANÇA
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
