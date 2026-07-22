@@ -19,7 +19,7 @@ from sqlalchemy import select
 from src.config import settings
 from src.database.connection import db
 from src.database.models import CodeCache
-from src.services import cache_service
+from src.services import cache_service, persistencia_estruturada
 from src.userbot import userbot
 from src.utils.logger import get_logger
 
@@ -68,6 +68,13 @@ async def _refresh_um(entry: CodeCache) -> bool:
             code=entry.code,
             query_type=entry.query_type,
             raw_response=resposta,
+        )
+        await persistencia_estruturada.salvar(
+            session,
+            code=entry.code,
+            query_type=entry.query_type,
+            raw=resposta,
+            origem_client="userbot",
         )
     return True
 

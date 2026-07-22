@@ -185,7 +185,7 @@ async def _process_codes_input(
         )
         return
 
-    # Cria batch + queries no DB
+    # Cria o batch primeiro (sem as queries ainda)
     async with db.session() as session:
         batch = QueryBatch(
             user_id=auth_user_id,
@@ -197,6 +197,30 @@ async def _process_codes_input(
         session.add(batch)
         await session.flush()  # gera batch.id
 
+    # Mensagem única de progresso — será editada pelo worker conforme o
+    # lote processa, em vez de mandar 1 mensagem por resultado individual.
+    # IMPORTANTE: precisa existir e ter seu message_id salvo ANTES de
+    # enfileirar qualquer query — cache-hit processa quase instantâneo, e se
+    # o worker chegar primeiro (progress_chat_id/message_id ainda nulos), a
+    # edição é silenciosamente pulada e a mensagem nunca atualiza.
+    sent = await message.answer(
+        f"🎉 <b>Lote em execução:</b>\n\n"
+        f"🆔 Lote: <code>#{batch.id[:8]}</code>\n"
+        f"📊 Total: <b>{len(codes)}</b>\n"
+        f"✅ OK: <b>0</b>\n"
+        f"❌ Erros: <b>0</b>\n"
+        f"⏱️ Timeouts: <b>0</b>\n"
+        f"⏱️ Duração: <b>0.0s</b>\n"
+    )
+
+    async with db.session() as session:
+        b = await session.get(QueryBatch, batch.id)
+        b.progress_chat_id = message.chat.id
+        b.progress_message_id = sent.message_id
+
+    # Só agora cria as queries e enfileira — garante que a mensagem de
+    # progresso já está pronta pra ser editada quando o worker processar.
+    async with db.session() as session:
         queries: list[NetworkQuery] = []
         for code in codes:
             q = NetworkQuery(
@@ -208,9 +232,7 @@ async def _process_codes_input(
             session.add(q)
             queries.append(q)
         await session.flush()  # gera ids
-        await session.commit()
 
-        # Captura os IDs antes de sair do session
         items = [
             QueueItem(
                 query_id=q.id,
@@ -229,24 +251,6 @@ async def _process_codes_input(
 
     # Limpa estado
     await state.clear()
-
-    # Mensagem única de progresso — será editada pelo worker conforme o
-    # lote processa, em vez de mandar 1 mensagem por resultado individual.
-    sent = await message.answer(
-        f"🎉 <b>Lote em execução:</b>\n\n"
-        f"🆔 Lote: <code>#{batch.id[:8]}</code>\n"
-        f"📊 Total: <b>{len(codes)}</b>\n"
-        f"✅ OK: <b>0</b>\n"
-        f"❌ Erros: <b>0</b>\n"
-        f"⏱️ Timeouts: <b>0</b>\n"
-        f"⏱️ Duração: <b>0.0s</b>\n"
-    )
-
-    async with db.session() as session:
-        b = await session.get(QueryBatch, batch.id)
-        if b:
-            b.progress_chat_id = message.chat.id
-            b.progress_message_id = sent.message_id
 
     if invalid:
         sample = ", ".join(invalid[:5])

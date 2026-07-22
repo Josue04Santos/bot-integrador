@@ -60,18 +60,27 @@ por qualquer um dos dois vira dado estruturado consultável pelos dois lados.
 Ver `src/database/models_estruturados.py`. Resumo dos campos relevantes
 pro CHI:
 
-**`equipamentos`** (1 linha por `code`): `tipo`, `alimentador`,
-`poste_referencia`, `clientes_total` (agregado — **não** é o dado do CHI),
-`situacao`, `latitude`/`longitude`, entre outros.
+> ✅ **Confirmado com o Naeg em 2026-07-22** (validado contra o texto bruto
+> real de um equipamento, código `0053317`): o campo que o CHI usa é
+> **`equipamentos.clientes_total`** — o "Clientes: 142" do **cabeçalho** da
+> resposta, 1 número agregado por equipamento. Não é a quebra por
+> componente da seção "CHAVES A MONTANTE". A tabela `componentes` continua
+> sendo persistida (dado útil, já vem de graça na mesma consulta), mas
+> **não é mais o campo crítico pro cálculo do CHI** — `clientes_total` é.
 
-**`componentes`** (filha de `equipamentos`, 1 linha por chave a montante):
+**`equipamentos`** (1 linha por `code`): `tipo`, `alimentador`,
+`poste_referencia`, **`clientes_total`** (⭐ campo do CHI, agregado do
+cabeçalho), `situacao`, `latitude`/`longitude`, entre outros.
+
+**`componentes`** (filha de `equipamentos`, 1 linha por chave a montante —
+dado suplementar, não crítico pro CHI):
 
 | Campo | Exemplo | Descrição |
 |---|---|---|
 | `tipo` | `FU`, `CF`, `RG`, `DJ`, `SE` | tipo da chave/proteção |
 | `componente_code` | `FU001` | código daquele componente específico |
 | `elo` | `6K`, `10K`, `LAM` | elo/fusível |
-| **`clientes`** | `42` | **⭐ o dado que o CHI usa** — clientes daquele componente |
+| `clientes` | `42` | clientes a partir daquele componente (não é o do CHI) |
 | `trafos` | `3` | transformadores a jusante daquele componente |
 | `ordem` | `0, 1, 2...` | ordem original na tabela de resposta do bot |
 
