@@ -46,6 +46,14 @@ async def _remove_buttons(message: Message) -> None:
         pass  # mensagem antiga demais pra editar, ou já sem teclado — sem problema
 
 
+async def _remove_buttons_by_id(bot: Bot, chat_id: int, message_id: int) -> None:
+    """Igual a `_remove_buttons`, mas quando só temos o ID (não o objeto Message)."""
+    try:
+        await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
+    except Exception:
+        pass
+
+
 # ============================================================================
 # 1) Callbacks dos botões POSTE / EQUIPAMENTO
 # ============================================================================
@@ -55,7 +63,7 @@ async def on_choose_poste(cb: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(QueryStates.waiting_code)
     await state.update_data(query_type="poste")
     await _remove_buttons(cb.message)
-    await cb.message.answer(
+    sent = await cb.message.answer(
         "🏗️ <b>Consulta de POSTE</b>\n\n"
         "Envie o(s) código(s):\n"
         "• <b>1 código:</b> <code>12345</code>\n"
@@ -64,6 +72,7 @@ async def on_choose_poste(cb: CallbackQuery, state: FSMContext) -> None:
         f"<i>Limite: {MAX_CODES_PER_BATCH} códigos por lote</i>",
         reply_markup=cancel_kb(),
     )
+    await state.update_data(prompt_message_id=sent.message_id)
     await cb.answer()
 
 
@@ -72,7 +81,7 @@ async def on_choose_equipamento(cb: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(QueryStates.waiting_code)
     await state.update_data(query_type="instalacao")
     await _remove_buttons(cb.message)
-    await cb.message.answer(
+    sent = await cb.message.answer(
         "⚡ <b>Consulta de EQUIPAMENTO/INSTALAÇÃO</b>\n\n"
         "Envie o(s) código(s):\n"
         "• <b>1 código:</b> <code>123456789</code>\n"
@@ -81,6 +90,7 @@ async def on_choose_equipamento(cb: CallbackQuery, state: FSMContext) -> None:
         f"<i>Limite: {MAX_CODES_PER_BATCH} códigos por lote</i>",
         reply_markup=cancel_kb(),
     )
+    await state.update_data(prompt_message_id=sent.message_id)
     await cb.answer()
 
 
@@ -184,6 +194,12 @@ async def _process_codes_input(
             f"Divida em lotes menores."
         )
         return
+
+    # Remove o botão "❌ Cancelar" do prompt anterior — o usuário já enviou
+    # os códigos, não faz mais sentido oferecer cancelar aquele passo.
+    prompt_message_id = data.get("prompt_message_id")
+    if prompt_message_id:
+        await _remove_buttons_by_id(message.bot, message.chat.id, prompt_message_id)
 
     # Cria o batch primeiro (sem as queries ainda)
     async with db.session() as session:
