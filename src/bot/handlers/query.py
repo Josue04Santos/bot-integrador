@@ -195,12 +195,6 @@ async def _process_codes_input(
         )
         return
 
-    # Remove o botão "❌ Cancelar" do prompt anterior — o usuário já enviou
-    # os códigos, não faz mais sentido oferecer cancelar aquele passo.
-    prompt_message_id = data.get("prompt_message_id")
-    if prompt_message_id:
-        await _remove_buttons_by_id(message.bot, message.chat.id, prompt_message_id)
-
     # Cria o batch primeiro (sem as queries ainda)
     async with db.session() as session:
         batch = QueryBatch(
@@ -233,6 +227,13 @@ async def _process_codes_input(
         b = await session.get(QueryBatch, batch.id)
         b.progress_chat_id = message.chat.id
         b.progress_message_id = sent.message_id
+
+    # Só remove o botão "❌ Cancelar" do prompt anterior AGORA — depois que a
+    # mensagem de "Lote em execução" já apareceu de verdade. Assim temos
+    # certeza que o envio do usuário foi aceito antes de tirar o cancelar.
+    prompt_message_id = data.get("prompt_message_id")
+    if prompt_message_id:
+        await _remove_buttons_by_id(message.bot, message.chat.id, prompt_message_id)
 
     # Só agora cria as queries e enfileira — garante que a mensagem de
     # progresso já está pronta pra ser editada quando o worker processar.
