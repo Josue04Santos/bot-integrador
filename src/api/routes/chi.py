@@ -11,11 +11,10 @@ tentar consulta ao vivo. Ver API_CHI.md para o contrato completo.
 """
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from src.api.deps import verify_api_key
 from src.config import settings
 from src.database.connection import db
 from src.database.models_estruturados import Equipamento, Poste
@@ -66,7 +65,6 @@ class ChiResponse(BaseModel):
 async def consultar_chi(
     codigo: str,
     tipo: str = Query(..., pattern="^(poste|equipamento)$"),
-    api_key: str = Depends(verify_api_key),
 ) -> ChiResponse:
     if tipo == "poste":
         return await _consultar_poste(codigo)
