@@ -18,7 +18,8 @@ from sqlalchemy import select
 from src.config import settings
 from src.database.connection import db
 from src.database.models_estruturados import Equipamento, Poste
-from src.services import persistencia_estruturada
+from src.parsing.deteccao import is_not_found
+from src.services import nao_encontrado_service, persistencia_estruturada
 from src.userbot_consulta_api import userbot_consulta_api
 from src.utils.logger import get_logger
 
@@ -83,7 +84,9 @@ async def _consultar_poste(codigo: str) -> ChiResponse:
             poste=PosteOut.model_validate(poste),
         )
 
+    await _checar_nao_encontrado(codigo, tipo="poste")
     raw = await _consultar_ao_vivo(codigo, tipo="poste")
+    await _tratar_se_nao_encontrado(codigo, tipo="poste", raw=raw)
 
     async with db.session() as session:
         poste = await persistencia_estruturada.salvar_poste(
@@ -110,7 +113,9 @@ async def _consultar_equipamento(codigo: str) -> ChiResponse:
             equipamento=EquipamentoOut.model_validate(equipamento),
         )
 
+    await _checar_nao_encontrado(codigo, tipo="equipamento")
     raw = await _consultar_ao_vivo(codigo, tipo="equipamento")
+    await _tratar_se_nao_encontrado(codigo, tipo="equipamento", raw=raw)
 
     async with db.session() as session:
         equipamento = await persistencia_estruturada.salvar_equipamento(
@@ -124,6 +129,33 @@ async def _consultar_equipamento(codigo: str) -> ChiResponse:
         success=True, codigo=codigo, tipo="equipamento", origem="bot_externo",
         equipamento=EquipamentoOut.model_validate(equipamento),
     )
+
+
+def _query_type(tipo: str) -> str:
+    """Mapeia o `tipo` da API ('poste'/'equipamento') pro `query_type` interno
+    ('poste'/'instalacao') — mesma convenção usada em code_cache/network_queries,
+    pra compartilhar a lista de não-encontrados com o bot DPL."""
+    return "instalacao" if tipo == "equipamento" else "poste"
+
+
+async def _checar_nao_encontrado(codigo: str, tipo: str) -> None:
+    """Se já confirmamos (dentro do TTL) que esse código não existe, 404 direto."""
+    async with db.session() as session:
+        ja_confirmado = await nao_encontrado_service.esta_confirmado_nao_encontrado(
+            session, codigo, _query_type(tipo)
+        )
+    if ja_confirmado:
+        raise HTTPException(
+            status_code=404,
+            detail="Código não cadastrado no sistema (confirmado anteriormente)",
+        )
+
+
+async def _tratar_se_nao_encontrado(codigo: str, tipo: str, raw: str | None) -> None:
+    """Se a resposta ao vivo confirma 'não cadastrado', registra pra não reconsultar."""
+    if raw is not None and is_not_found(raw):
+        async with db.session() as session:
+            await nao_encontrado_service.marcar_nao_encontrado(session, codigo, _query_type(tipo))
 
 
 async def _consultar_ao_vivo(codigo: str, tipo: str) -> str | None:
