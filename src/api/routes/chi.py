@@ -67,7 +67,7 @@ class ChiResponse(BaseModel):
     success: bool
     codigo: str
     tipo: str
-    origem: str  # "cache" | "bot_externo"
+    origem: str  # "bot_dpl" (já salvo no nosso banco) | "bot_eqtl" (consulta ao vivo)
     poste: PosteOut | None = None
     equipamento: EquipamentoOut | None = None
 
@@ -90,7 +90,7 @@ async def _consultar_poste(codigo: str) -> ChiResponse:
 
     if poste:
         return ChiResponse(
-            success=True, codigo=codigo, tipo="poste", origem="cache",
+            success=True, codigo=codigo, tipo="poste", origem="bot_dpl",
             poste=PosteOut.model_validate(poste),
         )
 
@@ -115,7 +115,7 @@ async def _consultar_poste(codigo: str) -> ChiResponse:
         raise HTTPException(status_code=404, detail="Código não cadastrado no sistema")
 
     return ChiResponse(
-        success=True, codigo=codigo, tipo="poste", origem="bot_externo",
+        success=True, codigo=codigo, tipo="poste", origem="bot_eqtl",
         poste=PosteOut.model_validate(poste),
     )
 
@@ -127,7 +127,7 @@ async def _consultar_equipamento(codigo: str) -> ChiResponse:
 
     if equipamento:
         return ChiResponse(
-            success=True, codigo=codigo, tipo="equipamento", origem="cache",
+            success=True, codigo=codigo, tipo="equipamento", origem="bot_dpl",
             equipamento=EquipamentoOut.model_validate(equipamento),
         )
 
@@ -152,7 +152,7 @@ async def _consultar_equipamento(codigo: str) -> ChiResponse:
         raise HTTPException(status_code=404, detail="Código não cadastrado no sistema")
 
     return ChiResponse(
-        success=True, codigo=codigo, tipo="equipamento", origem="bot_externo",
+        success=True, codigo=codigo, tipo="equipamento", origem="bot_eqtl",
         equipamento=EquipamentoOut.model_validate(equipamento),
     )
 
