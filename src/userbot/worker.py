@@ -19,7 +19,7 @@ from src.database.connection import db
 from src.database.models import NetworkQuery, QueryBatch
 from src.dispatcher import query_queue, QueueItem
 from src.parsing.deteccao import is_not_found as _is_not_found
-from src.services import cache_service, persistencia_estruturada
+from src.services import cache_service, nao_cadastrado_service, persistencia_estruturada
 from src.userbot import userbot
 from src.utils.logger import get_logger
 
@@ -192,10 +192,13 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
                 origem_client="userbot",
             )
         elif not_found:
-            # Resposta veio, mas o código não existe no sistema externo
+            # Resposta veio ao vivo do bot terceiro, e o código não existe
             query.status = "error"
             query.error_message = "não cadastrado"
             query.raw_response = response  # guarda para auditoria
+            await nao_cadastrado_service.registrar(
+                session, item.code, item.query_type, response
+            )
         elif error_msg:
             query.status = "error"
             query.error_message = error_msg

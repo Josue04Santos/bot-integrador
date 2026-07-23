@@ -19,6 +19,7 @@ from src.database.models_legado import (
     TelethonSession,
     UsuarioLegado,
 )
+from src.database.models_nao_cadastrado import CodigoNaoCadastrado
 from src.database.types import uuid7, uuid7_timestamp
 
 __all__ = [
@@ -42,6 +43,8 @@ __all__ = [
     # Legado
     "TelethonSession",
     "UsuarioLegado",
+    # Não cadastrados
+    "CodigoNaoCadastrado",
     # Utils
     "uuid7",
     "uuid7_timestamp",

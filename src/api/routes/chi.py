@@ -27,7 +27,8 @@ from sqlalchemy import select
 from src.config import settings
 from src.database.connection import db
 from src.database.models_estruturados import Equipamento, Poste
-from src.services import persistencia_estruturada
+from src.parsing.deteccao import is_not_found
+from src.services import nao_cadastrado_service, persistencia_estruturada
 from src.userbot import userbot
 from src.userbot_consulta_api import userbot_consulta_api
 from src.utils.logger import get_logger
@@ -95,6 +96,11 @@ async def _consultar_poste(codigo: str) -> ChiResponse:
 
     raw = await _consultar_ao_vivo(codigo, tipo="poste")
 
+    if is_not_found(raw):
+        async with db.session() as session:
+            await nao_cadastrado_service.registrar(session, codigo, "poste", raw)
+        raise HTTPException(status_code=404, detail=raw.strip())
+
     async with db.session() as session:
         poste = await persistencia_estruturada.salvar_poste(
             session, codigo, raw, origem_client="userbot_consulta_api"
@@ -121,6 +127,11 @@ async def _consultar_equipamento(codigo: str) -> ChiResponse:
         )
 
     raw = await _consultar_ao_vivo(codigo, tipo="equipamento")
+
+    if is_not_found(raw):
+        async with db.session() as session:
+            await nao_cadastrado_service.registrar(session, codigo, "instalacao", raw)
+        raise HTTPException(status_code=404, detail=raw.strip())
 
     async with db.session() as session:
         equipamento = await persistencia_estruturada.salvar_equipamento(
