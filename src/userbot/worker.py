@@ -297,14 +297,17 @@ def _format_progress_text(batch: QueryBatch) -> tuple[str, bool]:
         rodape = ""
         tem_sucesso = False
 
+    # Timeouts contam como Erros na mensagem — não interessa pro usuário
+    # distinguir as duas coisas, só quer saber quantos deram certo ou não.
+    erros = batch.failure_count + batch.timeout_count
+
     text = (
         f"{icon} <b>{status_text}</b>\n\n"
         f"🆔 Lote: <code>#{batch.id[:8]}</code>\n"
         f"📊 Total: <b>{batch.total_codes}</b>\n"
         f"✅ OK: <b>{batch.success_count}</b>\n"
-        f"❌ Erros: <b>{batch.failure_count}</b>\n"
-        f"⏱️ Timeouts: <b>{batch.timeout_count}</b>\n"
-        f"⏱️ Duração: <b>{_format_duration(batch)}</b>\n"
+        f"❌ Erros: <b>{erros}</b>\n"
+        f"⏱️ Duração Execução: <b>{_format_duration(batch)}</b>\n"
         f"{rodape}"
     )
     return text, tem_sucesso
