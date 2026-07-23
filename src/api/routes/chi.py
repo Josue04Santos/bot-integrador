@@ -2,12 +2,21 @@
 Endpoint de consulta para o Naeg (DPL) — cálculo de CHI.
 
 Cache-first: busca nas tabelas estruturadas (postes / equipamentos+componentes).
-Se não encontrar, consulta ao vivo via `userbot_consulta_api` (client Telegram
-exclusivo, conta separada do bot DPL) e persiste antes de responder.
+Se não encontrar, consulta ao vivo e persiste antes de responder.
 
-Se `userbot_consulta_api` não estiver configurado (sem credenciais ainda),
-o endpoint funciona só em modo cache — cache-miss vira 404 direto, sem
-tentar consulta ao vivo. Ver API_CHI.md para o contrato completo.
+Client ao vivo usado (nessa ordem):
+  1. `userbot_consulta_api` (conta dedicada do CHI, "Lucas") — se já
+     estiver configurado E com o chat já aberto com o bot terceiro.
+  2. Fallback temporário: `userbot` (conta do bot DPL, "Mario") — mesma
+     conexão/lock que o bot em tempo real já usa, enquanto a conta
+     dedicada do CHI não está pronta. Remover esse fallback assim que
+     a conta do Lucas estiver ativa (só desativar não é nem necessário:
+     o item 1 passa a ser escolhido automaticamente assim que
+     `userbot_consulta_api.is_configured` virar True).
+
+Se nenhum dos dois client estiver disponível, o endpoint funciona só em
+modo cache — cache-miss vira 404 direto, sem tentar consulta ao vivo.
+Ver API_CHI.md para o contrato completo.
 """
 import asyncio
 
@@ -20,6 +29,7 @@ from src.database.connection import db
 from src.database.models_estruturados import Equipamento, Poste
 from src.parsing.deteccao import is_not_found
 from src.services import nao_encontrado_service, persistencia_estruturada
+from src.userbot import userbot
 from src.userbot_consulta_api import userbot_consulta_api
 from src.utils.logger import get_logger
 
@@ -159,18 +169,23 @@ async def _tratar_se_nao_encontrado(codigo: str, tipo: str, raw: str | None) -> 
 
 
 async def _consultar_ao_vivo(codigo: str, tipo: str) -> str | None:
-    """Consulta ao vivo via userbot_consulta_api, ou 404 direto se não configurado."""
-    if not userbot_consulta_api.is_configured:
+    """
+    Consulta ao vivo — usa o client dedicado do CHI se já estiver pronto
+    (conta configurada + conectado), senão cai no fallback temporário
+    (conta do bot DPL, mesmo lock). Ver docstring do módulo.
+    """
+    if userbot_consulta_api.is_configured and userbot_consulta_api.is_connected:
+        client = userbot_consulta_api
+    elif userbot.is_connected:
+        client = userbot
+    else:
         raise HTTPException(
             status_code=404,
             detail="Código não encontrado no cache (consulta ao vivo indisponível — "
-                   "userbot_consulta_api ainda não configurado)",
+                   "nenhum client Telegram conectado)",
         )
 
-    query_fn = (
-        userbot_consulta_api.query_poste if tipo == "poste"
-        else userbot_consulta_api.query_equipamento
-    )
+    query_fn = client.query_poste if tipo == "poste" else client.query_equipamento
 
     try:
         raw = await asyncio.wait_for(
