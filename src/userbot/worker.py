@@ -19,7 +19,7 @@ from src.database.connection import db
 from src.database.models import NetworkQuery, QueryBatch
 from src.dispatcher import query_queue, QueueItem
 from src.parsing.deteccao import is_not_found as _is_not_found
-from src.services import cache_service, nao_encontrado_service, persistencia_estruturada
+from src.services import cache_service, persistencia_estruturada
 from src.userbot import userbot
 from src.utils.logger import get_logger
 
@@ -95,24 +95,6 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
         await _check_batch_complete(bot, item.batch_id)
         return
 
-    # ── Cache miss: já sabemos que esse código não existe? ──────────────────
-    # Evita reconsultar ao vivo um código confirmado como "não cadastrado"
-    # há menos de 30 dias (ver src/services/nao_encontrado_service.py).
-    async with db.session() as session:
-        ja_confirmado_ausente = await nao_encontrado_service.esta_confirmado_nao_encontrado(
-            session, item.code, item.query_type
-        )
-    if ja_confirmado_ausente:
-        async with db.session() as session:
-            query = await session.get(NetworkQuery, item.query_id)
-            if query:
-                query.status = "error"
-                query.error_message = "não cadastrado (confirmado anteriormente)"
-        await _update_batch(item.batch_id, error=True)
-        await _update_progress_message(bot, item.batch_id)
-        await _check_batch_complete(bot, item.batch_id)
-        return
-
     # ── Cache miss: consulta o bot externo ──────────────────────────────────
     # Garante cadência mínima para não sobrecarregar o bot externo
     await _wait_for_bot_ready()
@@ -176,9 +158,6 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
             query.status = "error"
             query.error_message = "não cadastrado"
             query.raw_response = response  # guarda para auditoria
-            await nao_encontrado_service.marcar_nao_encontrado(
-                session, item.code, item.query_type
-            )
         elif error_msg:
             query.status = "error"
             query.error_message = error_msg

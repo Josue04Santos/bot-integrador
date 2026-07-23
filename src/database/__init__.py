@@ -19,7 +19,6 @@ from src.database.models_legado import (
     TelethonSession,
     UsuarioLegado,
 )
-from src.database.models_nao_encontrado import CodigoNaoEncontrado
 from src.database.types import uuid7, uuid7_timestamp
 
 __all__ = [
@@ -43,8 +42,6 @@ __all__ = [
     # Legado
     "TelethonSession",
     "UsuarioLegado",
-    # Não encontrados
-    "CodigoNaoEncontrado",
     # Utils
     "uuid7",
     "uuid7_timestamp",
