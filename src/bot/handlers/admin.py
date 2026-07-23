@@ -6,11 +6,12 @@ import structlog
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from src.config import settings
 from src.database.connection import db
 from src.database.models import AuthorizedUser, utcnow
+from src.database.models_nao_encontrado import CodigoNaoEncontrado
 
 router = Router(name="admin")
 logger = structlog.get_logger(__name__)
@@ -263,3 +264,58 @@ async def cmd_promover(message: Message):
             await session.rollback()
             logger.error("Erro ao promover usuário", error=str(e))
             await message.reply(f"❌ Erro: {str(e)}")
+
+
+@router.message(Command("limparnaoencontrado"))
+async def cmd_limpar_nao_encontrado(message: Message):
+    """
+    Remove um código da lista de "não encontrados" — força a próxima
+    consulta a reconsultar o bot terceiro ao vivo, em vez de esperar o
+    TTL de 30 dias vencer (ex: componente que passou a existir).
+    Uso: /limparnaoencontrado <codigo> <poste|equipamento>
+    Restrito a super admins.
+    """
+    if not is_super_admin(message.from_user.id):
+        await message.reply("⛔ Você não tem permissão para usar este comando.")
+        return
+
+    args = message.text.split()[1:] if message.text else []
+    if len(args) != 2 or args[1] not in ("poste", "equipamento"):
+        await message.reply(
+            "❌ Uso incorreto.\n"
+            "Formato: /limparnaoencontrado <codigo> <poste|equipamento>\n"
+            "Exemplo: /limparnaoencontrado 0053910 equipamento"
+        )
+        return
+
+    codigo, tipo = args
+    query_type = "instalacao" if tipo == "equipamento" else "poste"
+
+    async with db.session() as session:
+        try:
+            result = await session.execute(
+                delete(CodigoNaoEncontrado).where(
+                    CodigoNaoEncontrado.code == codigo,
+                    CodigoNaoEncontrado.query_type == query_type,
+                )
+            )
+            await session.commit()
+        except Exception as e:
+            await session.rollback()
+            logger.error("Erro ao limpar código não encontrado", error=str(e))
+            await message.reply(f"❌ Erro: {str(e)}")
+            return
+
+    if result.rowcount:
+        logger.info(
+            "Código removido da lista de não encontrados",
+            codigo=codigo, tipo=tipo, by_admin=message.from_user.id,
+        )
+        await message.reply(
+            f"✅ Removido: <code>{codigo}</code> ({tipo})\n"
+            f"A próxima consulta vai direto ao vivo de novo."
+        )
+    else:
+        await message.reply(
+            f"ℹ️ <code>{codigo}</code> ({tipo}) não estava na lista de não encontrados."
+        )
