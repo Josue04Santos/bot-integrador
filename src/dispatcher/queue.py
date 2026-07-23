@@ -24,6 +24,7 @@ class QueueItem:
     chat_id: int        # 🆕 Telegram ID do CHAT (pode ser PV ou grupo)
     code: str           # código a consultar
     query_type: str     # "poste" | "instalacao"
+    is_admin: bool = False  # se True, worker manda a resposta bruta do bot terceiro (diagnóstico)
 
 
 class QueryQueue:

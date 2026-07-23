@@ -111,9 +111,13 @@ async def on_codes_text(
     message: Message,
     state: FSMContext,
     auth_user_id: str,
+    auth_user_role: str,
 ) -> None:
     raw = message.text.strip()
-    await _process_codes_input(message, state, auth_user_id, raw, source_label="texto")
+    await _process_codes_input(
+        message, state, auth_user_id, raw, source_label="texto",
+        is_admin=(auth_user_role == "admin"),
+    )
 
 
 # ============================================================================
@@ -126,6 +130,7 @@ async def on_codes_file(
     state: FSMContext,
     bot: Bot,
     auth_user_id: str,
+    auth_user_role: str,
 ) -> None:
     doc = message.document
 
@@ -148,7 +153,8 @@ async def on_codes_file(
         return
 
     await _process_codes_input(
-        message, state, auth_user_id, raw, source_label=f"arquivo {doc.file_name}"
+        message, state, auth_user_id, raw, source_label=f"arquivo {doc.file_name}",
+        is_admin=(auth_user_role == "admin"),
     )
 
 
@@ -162,6 +168,7 @@ async def _process_codes_input(
     auth_user_id: str,
     raw: str,
     source_label: str,
+    is_admin: bool = False,
 ) -> None:
     data = await state.get_data()
     query_type: str = data.get("query_type", "poste")
@@ -258,6 +265,7 @@ async def _process_codes_input(
                 chat_id=message.chat.id,
                 code=q.code,
                 query_type=q.query_type,
+                is_admin=is_admin,
             )
             for q in queries
         ]

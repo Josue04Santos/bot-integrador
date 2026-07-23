@@ -46,6 +46,40 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+async def _notificar_admin_raw(
+    bot: Bot,
+    item: QueueItem,
+    response: str | None,
+    origem: str,
+    response_ms: int | None,
+) -> None:
+    """
+    Manda a resposta bruta do bot terceiro pro admin que enviou o lote —
+    só quando `item.is_admin` — pra diagnosticar gargalo (tempo de resposta
+    real do @ReincidenciasBot por código).
+    """
+    if not item.is_admin:
+        return
+
+    tipo_label = "🏗️ POSTE" if item.query_type == "poste" else "⚡ EQUIPAMENTO"
+    tempo = f"{response_ms}ms" if response_ms is not None else "—"
+    header = (
+        f"🔍 <b>Diagnóstico</b> • {tipo_label} • <code>{item.code}</code>\n"
+        f"Origem: {origem} • Tempo: <b>{tempo}</b>"
+    )
+
+    if response:
+        body = response if len(response) < 3800 else response[:3800] + "\n\n[...truncado]"
+        text = f"{header}\n\n<pre>{body}</pre>"
+    else:
+        text = f"{header}\n\nSem resposta do bot remoto."
+
+    try:
+        await bot.send_message(item.chat_id, text)
+    except Exception:
+        logger.exception("Falha ao notificar admin (diagnóstico)", chat_id=item.chat_id)
+
+
 async def _process_one(item: QueueItem, bot: Bot) -> None:
     """Processa uma única consulta com verificação de cache."""
 
@@ -63,6 +97,7 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
                     query.error_message = "não cadastrado"
                     query.raw_response = cached.raw_response
             await _update_batch(item.batch_id, error=True)
+            await _notificar_admin_raw(bot, item, cached.raw_response, origem="cache (inválido)", response_ms=0)
             await _update_progress_message(bot, item.batch_id)
             await _check_batch_complete(bot, item.batch_id)
             return
@@ -87,10 +122,13 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
 
         if fresh:
             logger.info("Cache hit (fresco)", code=item.code, age=age)
+            origem_diag = f"cache ({age})"
         else:
             logger.info("Cache stale — refresh em background", code=item.code, age=age)
+            origem_diag = f"cache desatualizado ({age})"
             asyncio.create_task(_background_refresh(item.code, item.query_type))
 
+        await _notificar_admin_raw(bot, item, cached.raw_response, origem=origem_diag, response_ms=0)
         await _update_progress_message(bot, item.batch_id)
         await _check_batch_complete(bot, item.batch_id)
         return
@@ -169,6 +207,7 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
         success=bool(response and not not_found),
         error=bool(error_msg or not_found),
     )
+    await _notificar_admin_raw(bot, item, response, origem="ao vivo", response_ms=elapsed_ms)
     await _update_progress_message(bot, item.batch_id)
     await _check_batch_complete(bot, item.batch_id)
 
