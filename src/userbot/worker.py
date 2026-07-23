@@ -306,7 +306,7 @@ def _format_progress_text(batch: QueryBatch) -> tuple[str, bool]:
         f"🆔 Lote: <code>#{batch.id[:8]}</code>\n"
         f"📊 Total: <b>{batch.total_codes}</b>\n"
         f"✅ OK: <b>{batch.success_count}</b>\n"
-        f"❌ Erros: <b>{erros}</b>\n"
+        f"❌ Erros: <b>{erros}</b>\n\n"
         f"⏱️ Duração Execução: <b>{_format_duration(batch)}</b>\n"
         f"{rodape}"
     )
