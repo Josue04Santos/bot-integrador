@@ -133,6 +133,28 @@ async def _process_one(item: QueueItem, bot: Bot) -> None:
         await _check_batch_complete(bot, item.batch_id)
         return
 
+    # ── Cache miss: já confirmamos recentemente que não existe? ─────────────
+    # TTL de 7 dias — evita reconsultar ao vivo à toa (ver src/services/nao_cadastrado_service.py)
+    async with db.session() as session:
+        confirmado = await nao_cadastrado_service.buscar_recente(session, item.code, item.query_type)
+
+    if confirmado:
+        async with db.session() as session:
+            query = await session.get(NetworkQuery, item.query_id)
+            if query:
+                query.status = "error"
+                query.error_message = "não cadastrado"
+                query.raw_response = confirmado.raw_response
+        await _update_batch(item.batch_id, error=True)
+        await _notificar_admin_raw(
+            bot, item, confirmado.raw_response,
+            origem=f"não cadastrado (confirmado {confirmado.vezes_confirmado}x)",
+            response_ms=0,
+        )
+        await _update_progress_message(bot, item.batch_id)
+        await _check_batch_complete(bot, item.batch_id)
+        return
+
     # ── Cache miss: consulta o bot externo ──────────────────────────────────
     # Garante cadência mínima para não sobrecarregar o bot externo
     await _wait_for_bot_ready()

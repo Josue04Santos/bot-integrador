@@ -94,6 +94,11 @@ async def _consultar_poste(codigo: str) -> ChiResponse:
             poste=PosteOut.model_validate(poste),
         )
 
+    async with db.session() as session:
+        confirmado = await nao_cadastrado_service.buscar_recente(session, codigo, "poste")
+    if confirmado:
+        raise HTTPException(status_code=404, detail=confirmado.raw_response.strip())
+
     raw = await _consultar_ao_vivo(codigo, tipo="poste")
 
     if is_not_found(raw):
@@ -125,6 +130,11 @@ async def _consultar_equipamento(codigo: str) -> ChiResponse:
             success=True, codigo=codigo, tipo="equipamento", origem="cache",
             equipamento=EquipamentoOut.model_validate(equipamento),
         )
+
+    async with db.session() as session:
+        confirmado = await nao_cadastrado_service.buscar_recente(session, codigo, "instalacao")
+    if confirmado:
+        raise HTTPException(status_code=404, detail=confirmado.raw_response.strip())
 
     raw = await _consultar_ao_vivo(codigo, tipo="equipamento")
 

@@ -1,18 +1,19 @@
 """
 Registro de códigos confirmados como "não cadastrado" no @ReincidenciasBot.
 
-Diferente da tentativa anterior (removida): aqui é só um REGISTRO/histórico
-— não pula a consulta ao vivo da próxima vez. Toda consulta sempre vai ao
-vivo; isso só guarda a última resposta de "não cadastrado" recebida, pra
-consulta/auditoria (e pra devolver o texto exato pro chamador da API).
+TTL de 7 dias: dentro do prazo, a próxima consulta é respondida direto
+daqui (sem reconsultar o bot terceiro). Passado o prazo, reconsulta ao
+vivo normalmente — cobre o caso do componente passar a existir depois.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import DateTime, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.database.models import Base
 from src.database.types import uuid7
+
+TTL_DIAS = 7
 
 
 def utcnow() -> datetime:
@@ -38,6 +39,14 @@ class CodigoNaoCadastrado(Base):
         UniqueConstraint("code", "query_type", name="uq_codigo_nao_cadastrado"),
         Index("ix_codigos_nao_cadastrados_code_type", "code", "query_type"),
     )
+
+    @property
+    def is_fresh(self) -> bool:
+        """True se ainda dentro do TTL — responde direto, sem reconsultar."""
+        ultima = self.ultima_vez
+        if ultima.tzinfo is None:
+            ultima = ultima.replace(tzinfo=timezone.utc)
+        return ultima >= utcnow() - timedelta(days=TTL_DIAS)
 
     def __repr__(self) -> str:
         return f"<CodigoNaoCadastrado code={self.code} type={self.query_type} vezes={self.vezes_confirmado}>"
