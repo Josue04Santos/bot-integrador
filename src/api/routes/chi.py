@@ -170,14 +170,22 @@ async def _tratar_se_nao_encontrado(codigo: str, tipo: str, raw: str | None) -> 
 
 async def _consultar_ao_vivo(codigo: str, tipo: str) -> str | None:
     """
-    Consulta ao vivo — usa o client dedicado do CHI se já estiver pronto
-    (conta configurada + conectado), senão cai no fallback temporário
-    (conta do bot DPL, mesmo lock). Ver docstring do módulo.
+    Consulta ao vivo.
+
+    TEMPORÁRIO: prioriza a conta do bot DPL (Mario) — a conta dedicada do
+    CHI (Lucas) está conectada ao Telegram, mas nunca abriu chat com o
+    @ReincidenciasBot, então qualquer consulta por ela trava até dar timeout
+    (o bot terceiro nunca manda o prompt de volta). `is_connected` não
+    detecta isso — só confirma que a sessão Telethon está online, não que
+    a conversa com o bot terceiro funciona de verdade.
+
+    Reverter essa prioridade assim que a conta do Lucas estiver resolvida
+    (trocar a ordem do if/elif abaixo).
     """
-    if userbot_consulta_api.is_configured and userbot_consulta_api.is_connected:
-        client = userbot_consulta_api
-    elif userbot.is_connected:
+    if userbot.is_connected:
         client = userbot
+    elif userbot_consulta_api.is_configured and userbot_consulta_api.is_connected:
+        client = userbot_consulta_api
     else:
         raise HTTPException(
             status_code=404,
