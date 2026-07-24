@@ -19,12 +19,12 @@ _COMANDOS_PUBLICOS = [
     BotCommand(command="start", description="Iniciar o bot"),
     BotCommand(command="help", description="Ajuda e instruções"),
     BotCommand(command="status", description="Status do bot e da fila"),
-    BotCommand(command="whoami", description="Ver seu perfil e permissões"),
-    BotCommand(command="kml", description="Baixar KML/CSV de um lote antigo"),
 ]
 
 # Comandos extras, só pros super admins (settings.super_admin_ids)
 _COMANDOS_ADMIN = _COMANDOS_PUBLICOS + [
+    BotCommand(command="whoami", description="Ver seu perfil e permissões"),
+    BotCommand(command="kml", description="Baixar KML/CSV de um lote antigo"),
     BotCommand(command="autorizar", description="Autorizar novo usuário"),
     BotCommand(command="desautorizar", description="Desativar um usuário"),
     BotCommand(command="usuarios", description="Listar usuários cadastrados"),
