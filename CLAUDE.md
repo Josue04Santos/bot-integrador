@@ -51,5 +51,10 @@ cd ~/projetos/dev/bot-integrador && venv/bin/python -m pytest tests -q
 - Logs mostram reconexão Telethon a cada ~1 min (normal até agora, mas é ruído no journal).
 - Remoto tem branch `claude/claude-md-docs-682xm8` esquecida.
 
+## 8.1 Pendências (levantamento 30/09 — o chat deve mostrar estas ao abrir uma SALA deste projeto)
+- **Dev e prod usam o MESMO banco** (`bot_integrador`): separar o banco de dev antes de qualquer teste.
+- Serviço no ar desde 24/07 (dashboard :8080) — confirmar se alguém ainda usa o bot; webhook `startbot.dpl.srv.br` aponta para 192.168.1.212 (outro host).
+- Dev estava 24 commits atrás da prod — alinhado em 30/09 (`dc9f387`).
+
 ## 9. Histórico e memórias relacionadas
 Nenhuma memória específica (projeto citado em `project_padronizacao_fichas_projetos.md`). Possível antecessor: `~/projetos/dev/fluxo-operacional` (bot/userbot/KML, mai/2026).
