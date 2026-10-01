@@ -13,7 +13,7 @@ elétrica por código), grava no Postgres e exporta KML/GPX/CSV (OsmAnd, Google 
 | O quê | Valor |
 |---|---|
 | Repositório | `github.com/Josue04Santos/bot-integrador` |
-| Pasta de desenvolvimento | `~/projetos/dev/bot-integrador` — branch `master`, **24 commits atrás da produção** (último 22/07) |
+| Pasta de desenvolvimento | `~/projetos/dev/bot-integrador` — branch `master` (alinhado com a produção em 30/09, `dc9f387`) |
 | Pasta de produção | `~/project/bot_integrador` — branch `master` (clone separado, NÃO worktree), último commit 24/07 `c4fd366` |
 | Docs | `README.md`, `API_CHI.md`, `COMANDOS.md`, vários relatórios soltos (`CODE_ANALYSIS_REPORT.md`, `OSMAND_*.md`…) |
 
@@ -22,17 +22,17 @@ elétrica por código), grava no Postgres e exporta KML/GPX/CSV (OsmAnd, Google 
 | Parte | Dev | Produção |
 |---|---|---|
 | Bot + worker + dashboard | não roda | `bot-integrador.service` (sistema), `venv/bin/python -m src.main`, dashboard porta `8080` |
-| Webhook Telegram | — | `WEBHOOK_ENABLED=true`, URL em `startbot.dpl.srv.br` (nginx → 192.168.1.212, não este host — conferir) |
+| Telegram | polling (`dp.start_polling` em `src/main.py`) | polling — as variáveis de webhook existem no `.env`, mas o código NÃO implementa webhook |
 | Banco (Postgres `192.168.1.202`) | `bot_integrador` | `bot_integrador` (**o MESMO**) |
 
 ## 4. Fluxo de git
-Um chat por vez. Hoje o dev está atrás: antes de mexer, `git pull` no dev (trazer os 24 commits da prod).
+Um chat por vez. Antes de mexer, `git pull` no dev (dev e prod são clones separados do mesmo `master`).
 Depois: commit no dev → push → `git pull` na prod. Formato em uso: frase curta / `fix:`/`feat:`. Nunca `git add -A`.
 
 ## 5. Publicar e voltar atrás
 - Publicar: na prod, `git pull` + `sudo systemctl restart bot-integrador` — sempre com OK do usuário.
 - Voltar atrás: `git checkout <hash anterior>` na prod + restart.
-- Migração: há `alembic/` só na prod — sempre perguntar antes.
+- Migração (`alembic/`): sempre perguntar antes.
 
 ## 6. Testes
 ```bash
