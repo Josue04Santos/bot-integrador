@@ -7162,7 +7162,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 ## 📊 Teste Rápido
 
 ```bash
-cd ~/projetos/dev/bot-integrador
+cd ~/dev/bot-integrador
 source venv/bin/activate
 
 # 1. Gerar exemplos
@@ -7467,7 +7467,7 @@ gpx_xml = build_gpx(
 
 ### Gerar GPX de teste
 ```bash
-cd ~/projetos/dev/bot-integrador
+cd ~/dev/bot-integrador
 source venv/bin/activate
 python3 test_generate_gpx.py
 ```
@@ -8140,10 +8140,10 @@ class MockEquipamentoData:
 
 # Import do código compilado
 import sys
-sys.path.insert(0, '/home/ti/projetos/dev/bot-integrador')
+sys.path.insert(0, '/home/ti/dev/bot-integrador')
 
 # Ler e parsear manualmente o arquivo gpx_equipamentos.py
-with open('/home/ti/projetos/dev/bot-integrador/src/exporters/gpx_equipamentos.py', 'r', encoding='utf-8') as f:
+with open('/home/ti/dev/bot-integrador/src/exporters/gpx_equipamentos.py', 'r', encoding='utf-8') as f:
     gpx_content = f.read()
 
 # Valida que o arquivo contém as funções esperadas
@@ -11709,7 +11709,7 @@ python3 test_gpx_routes.py seu_arquivo.gpx
 ### Opção 1: Testar agora mesmo
 
 ```bash
-cd ~/projetos/dev/bot-integrador
+cd ~/dev/bot-integrador
 source venv/bin/activate
 
 # 1. Gerar exemplos
@@ -11937,7 +11937,7 @@ Desenvolvido com ❤️ — Bot Integrador DPL Construções
 
 🧪 TESTE RÁPIDO:
 ─────────────────
-$ cd ~/projetos/dev/bot-integrador
+$ cd ~/dev/bot-integrador
 $ source venv/bin/activate
 $ python3 test_generate_gpx.py
 $ python3 test_gpx_routes.py tests/output/postes_TESTE_com_track.gpx

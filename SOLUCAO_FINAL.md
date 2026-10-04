@@ -112,7 +112,7 @@ python3 test_gpx_routes.py seu_arquivo.gpx
 ### Opção 1: Testar agora mesmo
 
 ```bash
-cd ~/projetos/dev/bot-integrador
+cd ~/dev/bot-integrador
 source venv/bin/activate
 
 # 1. Gerar exemplos

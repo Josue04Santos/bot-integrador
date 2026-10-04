@@ -13,7 +13,7 @@ elétrica por código), grava no Postgres e exporta KML/GPX/CSV (OsmAnd, Google 
 | O quê | Valor |
 |---|---|
 | Repositório | `github.com/Josue04Santos/bot-integrador` |
-| Pasta de desenvolvimento | `~/projetos/dev/bot-integrador` — branch `master` (alinhado com a produção em 30/09, `dc9f387`) |
+| Pasta de desenvolvimento | `~/dev/bot-integrador` — branch `master` (alinhado com a produção em 30/09, `dc9f387`) |
 | Pasta de produção | `~/project/bot_integrador` — branch `master` (clone separado, NÃO worktree), último commit 24/07 `c4fd366` |
 | Docs | `README.md`, `API_CHI.md`, `COMANDOS.md`, vários relatórios soltos (`CODE_ANALYSIS_REPORT.md`, `OSMAND_*.md`…) |
 
@@ -36,7 +36,7 @@ Depois: commit no dev → push → `git pull` na prod. Formato em uso: frase cur
 
 ## 6. Testes
 ```bash
-cd ~/projetos/dev/bot-integrador && venv/bin/python -m pytest tests -q
+cd ~/dev/bot-integrador && venv/bin/python -m pytest tests -q
 ```
 
 ## 7. Dados e segredos
@@ -57,4 +57,4 @@ cd ~/projetos/dev/bot-integrador && venv/bin/python -m pytest tests -q
 - Dev estava 24 commits atrás da prod — alinhado em 30/09 (`dc9f387`).
 
 ## 9. Histórico e memórias relacionadas
-Nenhuma memória específica (projeto citado em `project_padronizacao_fichas_projetos.md`). Possível antecessor: `~/projetos/dev/fluxo-operacional` (bot/userbot/KML, mai/2026).
+Nenhuma memória específica (projeto citado em `project_padronizacao_fichas_projetos.md`). Possível antecessor: `~/dev/fluxo-operacional` (bot/userbot/KML, mai/2026).

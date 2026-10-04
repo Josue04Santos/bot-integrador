@@ -751,7 +751,7 @@ bot-integrador/
 | `@ReincidenciasBot` | Bot externo consultado pelos userbots (fonte dos dados de rede) |
 | Naeg (cálculo de CHI) | Consumidor da API `GET /api/v1/chi/{codigo}` |
 
-<!-- PREENCHER: confirmar se ~/projetos/dev/fluxo-operacional (bot/userbot/KML, mai/2026) é o antecessor deste projeto e linkar -->
+<!-- PREENCHER: confirmar se ~/dev/fluxo-operacional (bot/userbot/KML, mai/2026) é o antecessor deste projeto e linkar -->
 
 ## 🤝 Créditos
 

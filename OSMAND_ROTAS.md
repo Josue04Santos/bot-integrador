@@ -256,7 +256,7 @@ gpx_xml = build_gpx(
 
 ### Gerar GPX de teste
 ```bash
-cd ~/projetos/dev/bot-integrador
+cd ~/dev/bot-integrador
 source venv/bin/activate
 python3 test_generate_gpx.py
 ```

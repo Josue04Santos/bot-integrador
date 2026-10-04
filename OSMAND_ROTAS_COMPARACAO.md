@@ -138,7 +138,7 @@
 ## 📊 Teste Rápido
 
 ```bash
-cd ~/projetos/dev/bot-integrador
+cd ~/dev/bot-integrador
 source venv/bin/activate
 
 # 1. Gerar exemplos
