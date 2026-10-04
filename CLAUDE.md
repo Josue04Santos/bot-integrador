@@ -1,6 +1,6 @@
 # bot-integrador (Bot Integrador DPL) — ficha do projeto
 
-> Ficha padrão (modelo em `~/projetos/_templates/FICHA-CLAUDE.md`). Todo chat lê isto antes de mexer no projeto.
+> Ficha padrão (modelo em `~/padrao/templates/FICHA-CLAUDE.md`). Todo chat lê isto antes de mexer no projeto.
 > Mudou algo que está aqui (porta, serviço, fluxo, caminho)? Atualize a ficha NO MESMO COMMIT.
 
 ## 1. O que é
