@@ -13,8 +13,8 @@ elétrica por código), grava no Postgres e exporta KML/GPX/CSV (OsmAnd, Google 
 | O quê | Valor |
 |---|---|
 | Repositório | `github.com/Josue04Santos/bot-integrador` |
-| Pasta de desenvolvimento | `~/dev/bot-integrador` — branch `master` (alinhado com a produção em 30/09, `dc9f387`) |
-| Pasta de produção | `~/project/bot_integrador` — branch `master` (clone separado, NÃO worktree), último commit 24/07 `c4fd366` |
+| Pasta de desenvolvimento | `~/dev/bot-integrador` — branch `main` (alinhado com a produção em 30/09, `dc9f387`) |
+| Pasta de produção | `~/project/bot_integrador` — branch `main` (clone separado, NÃO worktree), último commit 24/07 `c4fd366` |
 | Docs | `README.md`, `API_CHI.md`, `COMANDOS.md`, vários relatórios soltos (`CODE_ANALYSIS_REPORT.md`, `OSMAND_*.md`…) |
 
 ## 3. Como roda
@@ -26,7 +26,7 @@ elétrica por código), grava no Postgres e exporta KML/GPX/CSV (OsmAnd, Google 
 | Banco (Postgres `192.168.1.202`) | `bot_integrador` | `bot_integrador` (**o MESMO**) |
 
 ## 4. Fluxo de git
-Um chat por vez. Antes de mexer, `git pull` no dev (dev e prod são clones separados do mesmo `master`).
+Um chat por vez. Antes de mexer, `git pull` no dev (dev e prod são clones separados do mesmo `main`).
 Depois: commit no dev → push → `git pull` na prod. Formato em uso: frase curta / `fix:`/`feat:`. Nunca `git add -A`.
 
 ## 5. Publicar e voltar atrás
